@@ -1,50 +1,62 @@
 import 'package:flutter/material.dart';
-import 'package:admin_panel/user.dart';
+import 'user.dart';
 import 'create_edit_order_screen.dart';
 import 'normal_delivery.dart';
 import 'order.dart';
-import 'login_screen.dart'; // <- импорт экрана логина
+import 'login_screen.dart';
 
 class AdminHome extends StatelessWidget {
   const AdminHome({super.key});
 
-  Widget _buildCard(BuildContext context, String title, IconData icon, Widget page) {
-    return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => page),
-        );
-      },
-      child: Card(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        elevation: 3,
-        child: Container(
-          height: 280,
-          width: 280,
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            gradient: const LinearGradient(
-              colors: [Color(0xFF4A90E2), Color(0xFF50E3C2)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
+  @override
+  Widget build(BuildContext context) {
+    // Определяем ширину экрана, чтобы понять, сколько колонок рисовать
+    final double screenWidth = MediaQuery.of(context).size.width;
+    final int crossAxisCount = screenWidth > 900 ? 4 : (screenWidth > 600 ? 3 : 2);
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF1F5F9), // Мягкий фон
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF0F172A),
+        elevation: 0,
+        title: const Text('COMMAND CENTER',
+            style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1.5, fontSize: 16)),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout_rounded, color: Colors.redAccent),
+            onPressed: () => Navigator.pushReplacement(
+                context, MaterialPageRoute(builder: (_) => const LoginScreen())),
           ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(20.0),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(icon, size: 36, color: Colors.white),
-              const SizedBox(height: 8),
-              Text(
-                title,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                ),
-                textAlign: TextAlign.center,
-              )
+              const Text('Панель управления',
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+              const SizedBox(height: 4),
+              const Text('Обзор всей системы доставки',
+                  style: TextStyle(color: Colors.blueGrey, fontSize: 14)),
+              const SizedBox(height: 24),
+
+              // Используем GridView.count для четкой сетки
+              GridView.count(
+                shrinkWrap: true, // Важно, чтобы внутри SingleChildScrollView не было ошибок
+                physics: const NeverScrollableScrollPhysics(), // Скроллит всё тело целиком
+                crossAxisCount: crossAxisCount, // 2 для телефона, 4 для ПК
+                mainAxisSpacing: 16,
+                crossAxisSpacing: 16,
+                childAspectRatio: 0.85, // Соотношение сторон карточки (чуть вытянута вниз)
+                children: [
+                  _buildCard(context, 'Клиенты', Icons.people_alt_rounded, Colors.indigo, const UsersScreen(), 'Управление'),
+                  _buildCard(context, 'Магазины', Icons.storefront_rounded, Colors.orange, const OrdersAdminScreen(), 'Заказы'),
+                  _buildCard(context, 'Логистика', Icons.local_shipping_rounded, Colors.teal, const AllCourierOrdersScreen(), 'Курьеры'),
+                  _buildCard(context, 'Аналитика', Icons.analytics_rounded, Colors.purple, const AdminStatisticsScreen(), 'Отчеты'),
+                ],
+              ),
             ],
           ),
         ),
@@ -52,47 +64,32 @@ class AdminHome extends StatelessWidget {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Панель администратора'),
-        centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: 'Выйти',
-            onPressed: () {
-              // Возврат на экран логина и удаление AdminHome из стека
-              Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (_) => const LoginScreen()));
-            },
-          ),
-        ],
-      ),
-      body: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+  Widget _buildCard(BuildContext context, String title, IconData icon, Color color, Widget page, String label) {
+    return GestureDetector(
+      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => page)),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4)),
+          ],
+        ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Верхний ряд
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _buildCard(context, 'Управление пользователями', Icons.person, const UsersScreen()),
-                _buildCard(context, 'Просмотр заказов', Icons.list_alt, const OrdersAdminScreen()),
-              ],
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle),
+              child: Icon(icon, color: color, size: 28),
             ),
-            const SizedBox(height: 20),
-            // Нижний ряд
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _buildCard(context, 'Все заказы курьеров', Icons.local_shipping, const AllCourierOrdersScreen()),
-                _buildCard(context, 'Статистика заказов', Icons.bar_chart, const AdminStatisticsScreen()),
-              ],
-            ),
+            const SizedBox(height: 12),
+            Text(title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF1E293B))),
+            const SizedBox(height: 4),
+            Text(label,
+                style: TextStyle(fontSize: 11, color: Colors.grey[400], fontWeight: FontWeight.w500)),
           ],
         ),
       ),

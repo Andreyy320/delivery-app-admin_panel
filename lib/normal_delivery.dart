@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
-import 'package:rxdart/rxdart.dart'; // Для объединения потоков
+import 'package:rxdart/rxdart.dart';
 
 class AllCourierOrdersScreen extends StatefulWidget {
   const AllCourierOrdersScreen({super.key});
@@ -11,12 +11,31 @@ class AllCourierOrdersScreen extends StatefulWidget {
 }
 
 class _AllCourierOrdersScreenState extends State<AllCourierOrdersScreen> {
-  String filterStatus = 'all'; // all / current / completed / delivered
-  String filterType = 'all'; // all / normal / delivery / city / mejCity
+  String filterStatus = 'all';
+  String filterType = 'all';
 
-  // --- Получаем все заказы в реальном времени ---
+  // --- ОБЩИЕ МЕТОДЫ ПЕРЕВОДА ---
+  String _translateStatus(String status) {
+    final s = status.toLowerCase().replaceAll('_', '').replaceAll(' ', '');
+    if (s == 'accepted' || s == 'принято') return 'Принят';
+    if (s == 'inprogress' || s == 'впути') return 'В пути';
+    if (s == 'delivered' || s == 'delivery' || s == 'доставлено') return 'Доставлен';
+    if (s == 'cancelled' || s == 'отменено') return 'Отменен';
+    if (s == 'ready' || s=='READY') return 'Готов';
+    return status;
+  }
+
+  String _translateType(String type) {
+    final t = type.toLowerCase();
+    if (t == 'normal') return 'Обычная';
+    if (t == 'delivery') return 'Срочная';
+    if (t == 'city') return 'Город';
+    if (t == 'mejcity' || t == 'intercity') return 'Межгород';
+    return type;
+  }
+
+  // --- ЛОГИКА ПОТОКОВ ---
   Stream<List<Map<String, dynamic>>> _getAllOrdersRealtime() {
-    // Поток заказов пользователей
     final userOrdersStream = FirebaseFirestore.instance.collection('users').snapshots()
         .asyncMap((usersSnapshot) async {
       List<Map<String, dynamic>> userOrders = [];
@@ -25,14 +44,13 @@ class _AllCourierOrdersScreenState extends State<AllCourierOrdersScreen> {
         for (var orderDoc in ordersSnapshot.docs) {
           final data = orderDoc.data();
           data['userId'] = userDoc.id;
-          data['type'] = 'normal';
+          if (data['type'] == null) data['type'] = 'normal';
           userOrders.add(data);
         }
       }
       return userOrders;
     });
 
-    // Поток истории курьеров
     final courierOrdersStream = FirebaseFirestore.instance.collection('couriers').snapshots()
         .asyncMap((couriersSnapshot) async {
       List<Map<String, dynamic>> courierOrders = [];
@@ -47,7 +65,6 @@ class _AllCourierOrdersScreenState extends State<AllCourierOrdersScreen> {
       return courierOrders;
     });
 
-    // Объединяем оба потока и сортируем
     return Rx.combineLatest2(userOrdersStream, courierOrdersStream, (a, b) {
       final allOrders = [...a, ...b];
       allOrders.sort((a, b) {
@@ -59,39 +76,29 @@ class _AllCourierOrdersScreenState extends State<AllCourierOrdersScreen> {
     });
   }
 
-  // --- Фильтр по статусу и типу ---
   List<Map<String, dynamic>> _applyFilters(List<Map<String, dynamic>> orders) {
     return orders.where((order) {
-      final status = (order['status'] ?? '').toLowerCase();
+      final status = (order['status'] ?? '').toLowerCase().replaceAll('_', '');
       final type = (order['type'] ?? '').toLowerCase();
 
       final matchesStatus = filterStatus == 'all' ||
-          (filterStatus == 'current' && (status == 'accepted' || status == 'in_progress')) ||
+          (filterStatus == 'current' && (status == 'accepted' || status == 'inprogress')) ||
           (filterStatus == 'completed' && status == 'cancelled') ||
-          (filterStatus == 'delivered' && status == 'delivered');
+          (filterStatus == 'delivered' && (status == 'delivered' || status == 'delivery'));
 
       final matchesType = filterType == 'all' || filterType == type;
-
       return matchesStatus && matchesType;
     }).toList();
   }
 
-  // --- Цвет статуса ---
   Color _statusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'accepted':
-      case 'in_progress':
-        return Colors.orange;
-      case 'delivered':
-        return Colors.green;
-      case 'cancelled':
-        return Colors.red;
-      default:
-        return Colors.grey;
-    }
+    final s = status.toLowerCase().replaceAll('_', '');
+    if (s == 'accepted' || s == 'inprogress') return Colors.orange;
+    if (s == 'delivered' || s == 'delivery') return Colors.green;
+    if (s == 'cancelled') return Colors.red;
+    return Colors.blueGrey;
   }
 
-  // --- Считаем сумму заказа ---
   double getOrderPrice(Map<String, dynamic> order) {
     if (order['totalPrice'] != null) return (order['totalPrice'] as num).toDouble();
     if (order['totalCost'] != null) return (order['totalCost'] as num).toDouble();
@@ -110,78 +117,45 @@ class _AllCourierOrdersScreenState extends State<AllCourierOrdersScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Все заказы курьеров')),
+      backgroundColor: const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        elevation: 0,
+        backgroundColor: const Color(0xFF0F172A),
+        iconTheme: const IconThemeData(color: Colors.white),
+        title: const Text('ЖУРНАЛ ЗАКАЗОВ',
+            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 1)),
+      ),
       body: Column(
         children: [
-          // --- Фильтр по статусу ---
-          Padding(
-            padding: const EdgeInsets.all(8),
-            child: DropdownButton<String>(
-              value: filterStatus,
-              isExpanded: true,
-              items: const [
-                DropdownMenuItem(value: 'all', child: Text('Все статусы')),
-                DropdownMenuItem(value: 'current', child: Text('Текущие')),
-                DropdownMenuItem(value: 'delivered', child: Text('Доставленные')),
-                DropdownMenuItem(value: 'completed', child: Text('Отменённые')),
+          Container(
+            padding: const EdgeInsets.only(bottom: 12),
+            decoration: const BoxDecoration(
+              color: Color(0xFF0F172A),
+              borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
+            ),
+            child: Column(
+              children: [
+                _buildFilterChips('status'),
+                const SizedBox(height: 4),
+                _buildFilterChips('type'),
               ],
-              onChanged: (value) => setState(() => filterStatus = value!),
             ),
           ),
-
-          // --- Фильтр по типу ---
-          Padding(
-            padding: const EdgeInsets.all(8),
-            child: DropdownButton<String>(
-              value: filterType,
-              isExpanded: true,
-              items: const [
-                DropdownMenuItem(value: 'all', child: Text('Все типы')),
-                DropdownMenuItem(value: 'normal', child: Text('Обычная')),
-                DropdownMenuItem(value: 'delivery', child: Text('Срочная')),
-                DropdownMenuItem(value: 'city', child: Text('Городская')),
-                DropdownMenuItem(value: 'mejcity', child: Text('Межгород')),
-              ],
-              onChanged: (value) => setState(() => filterType = value!),
-            ),
-          ),
-
-          // --- Список заказов ---
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
               stream: _getAllOrdersRealtime(),
               builder: (context, snapshot) {
-                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-
-                final filteredOrders = _applyFilters(snapshot.data!);
-                if (filteredOrders.isEmpty) return const Center(child: Text('Заказов нет'));
-
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator(color: Color(0xFF0F172A)));
+                }
+                final filteredOrders = _applyFilters(snapshot.data ?? []);
+                if (filteredOrders.isEmpty) {
+                  return const Center(child: Text('Заказов не найдено', style: TextStyle(color: Colors.grey)));
+                }
                 return ListView.builder(
+                  padding: const EdgeInsets.all(16),
                   itemCount: filteredOrders.length,
-                  itemBuilder: (context, index) {
-                    final order = filteredOrders[index];
-                    final status = order['status'] ?? '-';
-                    final type = order['type'] ?? '-';
-                    final clientName = order['clientName'] ?? order['userId'] ?? '-';
-                    final totalPrice = getOrderPrice(order);
-
-                    return Card(
-                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      child: ListTile(
-                        leading: Icon(Icons.local_shipping, color: _statusColor(status)),
-                        title: Text('Клиент: $clientName'),
-                        subtitle: Text('Статус: $status, Тип: $type, Сумма: $totalPrice ₽'),
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => OrderDetailsScreen(order: order),
-                            ),
-                          );
-                        },
-                      ),
-                    );
-                  },
+                  itemBuilder: (context, index) => _buildOrderCard(filteredOrders[index]),
                 );
               },
             ),
@@ -190,115 +164,218 @@ class _AllCourierOrdersScreenState extends State<AllCourierOrdersScreen> {
       ),
     );
   }
+
+  Widget _buildFilterChips(String category) {
+    bool isStatus = category == 'status';
+    List<Map<String, String>> items = isStatus ? [
+      {'id': 'all', 'label': 'Все'},
+      {'id': 'current', 'label': 'Текущие'},
+      {'id': 'delivered', 'label': 'Доставлены'},
+      {'id': 'completed', 'label': 'Отмена'},
+    ] : [
+      {'id': 'all', 'label': 'Все типы'},
+      {'id': 'normal', 'label': 'Обычная'},
+      {'id': 'delivery', 'label': 'Срочная'},
+      {'id': 'city', 'label': 'Город'},
+      {'id': 'mejcity', 'label': 'Межгород'},
+    ];
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: items.map((item) {
+          bool selected = isStatus ? filterStatus == item['id'] : filterType == item['id'];
+          return Padding(
+            padding: const EdgeInsets.only(right: 8, bottom: 4),
+            child: ChoiceChip(
+              // Текст теперь всегда яркий и читаемый
+              label: Text(
+                item['label']!,
+                style: TextStyle(
+                  color: selected ? Colors.white : Colors.white.withOpacity(0.9),
+                  fontSize: 12,
+                  fontWeight: selected ? FontWeight.bold : FontWeight.w500,
+                ),
+              ),
+              selected: selected,
+              onSelected: (v) => setState(() => isStatus ? filterStatus = item['id']! : filterType = item['id']!),
+
+              // Активная кнопка — насыщенный синий
+              selectedColor: Colors.blueAccent[700],
+
+              // Неактивная кнопка — глубокий темный (чтобы не сливалось с фоном шапки)
+              backgroundColor: const Color(0xFF1E293B),
+
+              showCheckmark: false,
+              elevation: selected ? 4 : 0,
+
+              // Четкая рамка, чтобы кнопки были визуально отделены
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(
+                  color: selected ? Colors.blueAccent : Colors.white24,
+                  width: 1,
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+  Widget _buildOrderCard(Map<String, dynamic> order) {
+    final status = (order['status'] ?? '-').toString();
+    final type = (order['type'] ?? 'normal').toString();
+    final price = getOrderPrice(order);
+    final color = _statusColor(status);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))],
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => OrderDetailsScreen(order: order))),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(15)),
+                child: Icon(Icons.local_shipping_outlined, color: color, size: 26),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(order['clientName'] ?? 'Без имени', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1E293B))),
+                    const SizedBox(height: 4),
+                    Text('${_translateType(type)} • ${price.toInt()} ₽', style: TextStyle(color: Colors.grey[500], fontSize: 13)),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                child: Text(_translateStatus(status).toUpperCase(), style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
-// ----------------- Детали заказа -----------------
 class OrderDetailsScreen extends StatelessWidget {
   final Map<String, dynamic> order;
   const OrderDetailsScreen({super.key, required this.order});
 
+  // Локальные методы перевода для деталей
+  String _ruStatus(String s) {
+    final status = s.toLowerCase().replaceAll('_', '');
+    if (status == 'accepted') return 'ПРИНЯТ';
+    if (status == 'READY') return 'ГОТОВ';
+    if (status == 'inprogress') return 'В ПУТИ';
+    if (status == 'delivered' || status == 'delivery') return 'ДОСТАВЛЕН';
+    if (status == 'canceled') return 'ОТМЕНЕН';
+    return s.toUpperCase();
+  }
+
+  String _ruType(String t) {
+    final type = t.toLowerCase();
+    if (type == 'normal') return 'Обычная доставка';
+    if (type == 'delivery') return 'Срочный вызов';
+    if (type == 'city') return 'По городу';
+    if (type == 'mejcity' || type == 'intercity') return 'Межгород';
+    return t;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final createdAt = order['createdAt'] is Timestamp
-        ? (order['createdAt'] as Timestamp).toDate()
-        : null;
-    final deliveredAt = order['deliveredAt'] is Timestamp
-        ? (order['deliveredAt'] as Timestamp).toDate()
-        : null;
-
     final items = order['items'] as List<dynamic>? ?? [];
-
-    double totalPrice = 0;
-    if (order['totalPrice'] != null) totalPrice = (order['totalPrice'] as num).toDouble();
-    else if (order['totalCost'] != null) totalPrice = (order['totalCost'] as num).toDouble();
-    else if (order['total'] != null) totalPrice = (order['total'] as num).toDouble();
-    else if (items.isNotEmpty) {
-      for (var item in items) {
-        totalPrice += (item['price'] ?? 0) * (item['quantity'] ?? 1);
-      }
-    }
-
-    final status = order['status'] ?? '-';
-    final type = order['type'] ?? '-';
-
-    // --- Адреса для всех типов ---
-    String addressPickup = 'Не указано';
-    String addressDropoff = 'Не указано';
-
-    switch (type) {
-      case 'normal':
-        final deliveryLocation = order['deliveryLocation'] as Map<String, dynamic>? ?? {};
-        if (deliveryLocation.isNotEmpty) {
-          addressDropoff = '${deliveryLocation['lat'] ?? '-'}, ${deliveryLocation['lng'] ?? '-'}';
-        }
-        break;
-
-      case 'city':
-      case 'mejCity':
-        if ((order['fromAddress'] ?? '').toString().isNotEmpty) {
-          addressPickup = order['fromAddress'];
-        }
-        if ((order['toAddress'] ?? '').toString().isNotEmpty) {
-          addressDropoff = order['toAddress'];
-        }
-        break;
-
-      default:
-        final pickup = order['pickup'] as Map<String, dynamic>? ?? {};
-        final dropoff = order['dropoff'] as Map<String, dynamic>? ?? {};
-        if (pickup.isNotEmpty) {
-          addressPickup = '${pickup['lat'] ?? '-'}, ${pickup['lng'] ?? '-'}';
-        }
-        if (dropoff.isNotEmpty) {
-          addressDropoff = '${dropoff['lat'] ?? '-'}, ${dropoff['lng'] ?? '-'}';
-        }
-    }
+    double total = 0;
+    if (order['totalPrice'] != null) total = (order['totalPrice'] as num).toDouble();
+    else if (order['totalCost'] != null) total = (order['totalCost'] as num).toDouble();
+    else { for (var i in items) total += (i['price'] ?? 0) * (i['quantity'] ?? 1); }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Детали заказа')),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: ListView(
-          children: [
-            Text('Клиент: ${order['clientName'] ?? '-'}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text('Телефон: ${order['clientPhone'] ?? '-'}'),
-            const SizedBox(height: 8),
-            Text('Статус: $status'),
-            Text('Тип: $type'),
-            if (createdAt != null) Text('Создан: ${DateFormat('yyyy-MM-dd HH:mm').format(createdAt)}'),
-            if (deliveredAt != null) Text('Доставлен: ${DateFormat('yyyy-MM-dd HH:mm').format(deliveredAt)}'),
+      backgroundColor: const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        elevation: 0,
+        backgroundColor: Colors.white,
+        iconTheme: const IconThemeData(color: Color(0xFF0F172A)),
+        title: const Text('ДЕТАЛИ ЗАКАЗА', style: TextStyle(color: Color(0xFF0F172A), fontWeight: FontWeight.bold, fontSize: 16)),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          _card(children: [
+            _row('Клиент', order['clientName'] ?? '—', isBold: true),
+            _row('Телефон', order['clientPhone'] ?? '—'),
+            _row('Статус', _ruStatus(order['status'] ?? '-'), color: Colors.blueAccent),
+            _row('Тип', _ruType(order['type'] ?? 'normal')),
+          ]),
+          const SizedBox(height: 16),
+          _card(title: 'МАРШРУТ', children: [
+            _row('Откуда', order['fromAddress'] ?? 'По GPS'),
+            _row('Куда', order['toAddress'] ?? 'По GPS'),
+          ]),
+          const SizedBox(height: 16),
+          _card(title: 'ОПЛАТА', children: [
+            _row('Итого', '${total.toInt()} ₽', isBold: true, color: Colors.green),
+          ]),
+          if (items.isNotEmpty) ...[
             const SizedBox(height: 16),
-
-            // Адреса
-            Text('Адрес забора: $addressPickup'),
-            Text('Адрес доставки: $addressDropoff'),
-            if (order['dateTime'] != null) Text('Время доставки: ${order['dateTime']}'),
-            const SizedBox(height: 16),
-
-            Text('Сумма: $totalPrice ₽', style: const TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 16),
-
-            // Товары
-            if (items.isNotEmpty) ...[
-              const Text('Товары:', style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              for (var item in items)
-                Text('- ${item['name'] ?? '-'} x${item['quantity'] ?? 1} (${item['price'] ?? 0} ₽)'),
-            ],
-
-            // Опции
-            if (order['options'] != null && (order['options'] as List).isNotEmpty)
-              Text('Опции: ${(order['options'] as List).join(', ')}'),
-
-            // Комментарий
-            if ((order['comment'] ?? '').isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Text('Комментарий: ${order['comment']}'),
-              ),
+            _card(title: 'СОСТАВ', children: [
+              for (var i in items)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Text('• ${i['name']} x${i['quantity']}', style: const TextStyle(fontSize: 14)),
+                ),
+            ]),
           ],
-        ),
+        ],
+      ),
+    );
+  }
+
+  Widget _card({String? title, required List<Widget> children}) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (title != null) ...[
+            Text(title, style: TextStyle(color: Colors.grey[400], fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 1)),
+            const SizedBox(height: 16),
+          ],
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  Widget _row(String label, String value, {bool isBold = false, Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(color: Colors.grey[500], fontSize: 14)),
+          Flexible(child: Text(value, textAlign: TextAlign.right, style: TextStyle(
+            fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
+            color: color ?? const Color(0xFF1E293B),
+            fontSize: 14,
+          ))),
+        ],
       ),
     );
   }
