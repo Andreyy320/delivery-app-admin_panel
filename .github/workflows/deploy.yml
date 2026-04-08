@@ -3,7 +3,7 @@ name: Deploy to Firebase Hosting
 on:
   push:
     branches:
-      - main  # Если в Android Studio внизу справа написано master, замени main на master
+      - main
 
 jobs:
   build_and_deploy:
@@ -16,13 +16,12 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          flutter-version: '3.19.0' # Фикс ошибки: качаем версию, которая знает про web-renderer
+          flutter-version: '3.22.0'
 
       - name: Install dependencies
         run: flutter pub get
 
       - name: Build Web
-        # Фикс картинок: собираем с правильным рендером для браузера
         run: flutter build web --web-renderer html --release
 
       - name: Deploy to Firebase
