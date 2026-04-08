@@ -1,24 +1,28 @@
 name: Deploy to Firebase Hosting
+
 on:
   push:
     branches:
-      - main  # или master, проверь имя своей ветки
+      - main  # Если в Android Studio внизу справа написано master, замени main на master
 
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - uses: subosito/flutter-action@v2
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          flutter-version: '3.19.0' # Фикс ошибки: качаем версию, которая знает про web-renderer
 
       - name: Install dependencies
         run: flutter pub get
 
       - name: Build Web
-        # Вот тут мы чиним твои картинки и иконки
+        # Фикс картинок: собираем с правильным рендером для браузера
         run: flutter build web --web-renderer html --release
 
       - name: Deploy to Firebase
@@ -27,4 +31,4 @@ jobs:
           repoToken: '${{ secrets.GITHUB_TOKEN }}'
           firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}'
           channelId: live
-          projectId: food-delivery-app-c9657  # замени на ID из настроек Firebase
+          projectId: food-delivery-app-c9657
