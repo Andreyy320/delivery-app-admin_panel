@@ -3,7 +3,7 @@ name: Deploy to Firebase Hosting
 on:
   push:
     branches:
-      - main
+      - main  # Если твоя ветка называется master, замени main на master
 
 jobs:
   build_and_deploy:
@@ -16,12 +16,14 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          flutter-version: '3.22.0'
+          # Используем самую свежую версию для поддержки Dart 3.8.1+
+          flutter-version: '3.29.0'
 
       - name: Install dependencies
         run: flutter pub get
 
       - name: Build Web
+        # Флаг --web-renderer html чинит отображение картинок в браузере
         run: flutter build web --web-renderer html --release
 
       - name: Deploy to Firebase
