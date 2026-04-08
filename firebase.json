@@ -1,1 +1,37 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"food-delivery-app-c9657","appId":"1:380222998663:android:d9260eba63c65312bfd022","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"food-delivery-app-c9657","configurations":{"android":"1:380222998663:android:d9260eba63c65312bfd022","web":"1:380222998663:web:402b55af7ff08b8ebfd022","windows":"1:380222998663:web:d6d9a029af435174bfd022"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "food-delivery-app-c9657",
+          "appId": "1:380222998663:android:d9260eba63c65312bfd022",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "food-delivery-app-c9657",
+          "configurations": {
+            "android": "1:380222998663:android:d9260eba63c65312bfd022",
+            "web": "1:380222998663:web:402b55af7ff08b8ebfd022",
+            "windows": "1:380222998663:web:d6d9a029af435174bfd022"
+          }
+        }
+      }
+    }
+  },
+  "hosting": {
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}
