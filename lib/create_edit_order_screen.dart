@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class AdminStatisticsScreen extends StatefulWidget {
-  const AdminStatisticsScreen({super.key});
+  final String currentAdminName;
+
+  const AdminStatisticsScreen({super.key, required this.currentAdminName});
 
   @override
   State<AdminStatisticsScreen> createState() => _AdminStatisticsScreenState();
@@ -10,7 +12,12 @@ class AdminStatisticsScreen extends StatefulWidget {
 
 class _AdminStatisticsScreenState extends State<AdminStatisticsScreen> {
   bool loading = true;
-  Map<String, dynamic> stats = {};
+  int totalOrders = 0;
+  double totalSum = 0.0;
+
+  // Ключ: Название заведения
+  // Значение: {count: int, sum: double, statuses: {statusName: count}}
+  Map<String, Map<String, dynamic>> restaurantStats = {};
 
   @override
   void initState() {
@@ -18,86 +25,69 @@ class _AdminStatisticsScreenState extends State<AdminStatisticsScreen> {
     _calculateStats();
   }
 
+  // --- ВСПОМОГАТЕЛЬНЫЙ ПЕРЕВОД СТАТУСОВ ДЛЯ ГРУППИРОВКИ ---
   String _translateStatus(String key) {
-    // Чистим ключ от лишних символов и пробелов
-    final normalized = key.toLowerCase().replaceAll('_', '').replaceAll(' ', '').trim();
-
-    switch (normalized) {
-      case 'new':
-        return 'Новый';
+    final s = key.toLowerCase().replaceAll('_', '').replaceAll(' ', '').trim();
+    switch (s) {
+      case 'new': return 'Новый';
+      case 'pending':
       case 'accepted':
-      case 'принято':
-        return 'Принято';
+      case 'принято': return 'Принято';
       case 'inprogress':
       case 'preparing':
-      case 'впути':
-      case 'впроцессе':
-        return 'В процессе';
+      case 'впроцессе': return 'Готовится';
       case 'delivered':
-      case 'delivery': // Поймали Delivery из твоего скриншота
-      case 'доставлено':
-        return 'Доставлено';
-      case 'canceled':
+      case 'доставлено': return 'Доставлено';
       case 'cancelled':
-      case 'отменено':
-        return 'Отменено';
+      case 'canceled':
+      case 'отменено': return 'Отменено';
       case 'ready':
-      case 'готовквыдаче':
-        return 'Готов к выдаче';
-      default:
-        return key.length > 0 ? key[0].toUpperCase() + key.substring(1) : 'Неизвестно';
-    }
-  }
-
-  String _translateType(String key) {
-    final normalized = key.toLowerCase().trim();
-
-    switch (normalized) {
-      case 'orders':
-        return 'Обычная';
-      case 'delivery':
-        return 'Курьерская';
-      case 'city':
-      case 'погороду':
-        return 'По городу';
-      case 'mejcity':
-      case 'intercity': // Поймали intercity из твоего скриншота
-      case 'межгород':
-        return 'Межгород';
-      case 'express':
-        return 'Экспресс';
-      default:
-        return key.length > 0 ? key[0].toUpperCase() + key.substring(1) : 'Обычная';
+      case 'готовквыдаче': return 'Готов';
+      case 'ontheway':
+      case 'впути': return 'В пути';
+      default: return key;
     }
   }
 
   // --- ЛОГИКА СБОРА ДАННЫХ ---
   Future<void> _calculateStats() async {
-    int totalOrders = 0;
-    double totalSum = 0.0;
-    Map<String, int> statusCounts = {};
-    Map<String, int> typeCounts = {};
+    setState(() => loading = true);
+
+    int tempTotalOrders = 0;
+    double tempTotalSum = 0.0;
+    Map<String, Map<String, dynamic>> tempRestStats = {};
 
     try {
-      // 1. Сбор заказов из коллекции пользователей
       final usersSnapshot = await FirebaseFirestore.instance.collection('users').get();
+
       for (var userDoc in usersSnapshot.docs) {
         final ordersSnapshot = await userDoc.reference.collection('orders').get();
-        for (var orderDoc in ordersSnapshot.docs) {
-          _processOrder(orderDoc.data(), statusCounts, typeCounts);
-          totalOrders++;
-          totalSum += _parsePrice(orderDoc.data());
-        }
-      }
 
-      // 2. Сбор заказов из истории курьеров
-      final couriersSnapshot = await FirebaseFirestore.instance.collection('couriers').get();
-      for (var courierDoc in couriersSnapshot.docs) {
-        final historySnapshot = await courierDoc.reference.collection('history').get();
-        for (var orderDoc in historySnapshot.docs) {
-          _processOrder(orderDoc.data(), statusCounts, typeCounts);
-          totalOrders++;
-          totalSum += _parsePrice(orderDoc.data());
+        for (var orderDoc in ordersSnapshot.docs) {
+          final data = orderDoc.data();
+          double price = _parsePrice(data);
+          String restName = data['restaurantName'] ?? data['shopName'] ?? 'Прочие товары';
+          String rawStatus = (data['status'] ?? 'new').toString();
+          String translatedStatus = _translateStatus(rawStatus);
+
+          tempTotalOrders++;
+          tempTotalSum += price;
+
+          // Инициализируем ресторан, если его еще нет
+          if (!tempRestStats.containsKey(restName)) {
+            tempRestStats[restName] = {
+              'count': 0,
+              'sum': 0.0,
+              'statuses': <String, int>{}, // Вложенная мапа для статусов
+            };
+          }
+
+          tempRestStats[restName]!['count'] += 1;
+          tempRestStats[restName]!['sum'] += price;
+
+          // Считаем статусы внутри этого заведения
+          Map<String, int> statMap = tempRestStats[restName]!['statuses'];
+          statMap[translatedStatus] = (statMap[translatedStatus] ?? 0) + 1;
         }
       }
     } catch (e) {
@@ -106,32 +96,19 @@ class _AdminStatisticsScreenState extends State<AdminStatisticsScreen> {
 
     if (mounted) {
       setState(() {
-        stats = {
-          'totalOrders': totalOrders,
-          'totalSum': totalSum,
-          'statusCounts': statusCounts,
-          'typeCounts': typeCounts,
-        };
+        totalOrders = tempTotalOrders;
+        totalSum = tempTotalSum;
+        restaurantStats = tempRestStats;
         loading = false;
       });
     }
   }
 
-  void _processOrder(Map<String, dynamic> data, Map<String, int> sMap, Map<String, int> tMap) {
-    // Получаем переведенные названия сразу, чтобы в Мапе они считались как один ключ
-    final status = _translateStatus((data['status'] ?? 'Неизвестно').toString());
-    final type = _translateType((data['type'] ?? 'Обычная').toString());
-
-    sMap[status] = (sMap[status] ?? 0) + 1;
-    tMap[type] = (tMap[type] ?? 0) + 1;
-  }
-
   double _parsePrice(Map<String, dynamic> data) {
-    final price = (data['totalPrice'] ?? data['totalCost'] ?? data['total'] ?? 0) as num;
+    final price = (data['total'] ?? data['totalPrice'] ?? 0) as num;
     return price.toDouble();
   }
 
-  // --- UI КОМПОНЕНТЫ ---
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -140,113 +117,158 @@ class _AdminStatisticsScreenState extends State<AdminStatisticsScreen> {
         elevation: 0,
         backgroundColor: const Color(0xFF0F172A),
         iconTheme: const IconThemeData(color: Colors.white),
-        title: const Text('АНАЛИТИКА',
-            style: TextStyle(fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 1.2)),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('ДЕТАЛЬНАЯ АНАЛИТИКА',
+                style: TextStyle(fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 1.2, fontSize: 14)),
+            Text('Админ: ${widget.currentAdminName}',
+                style: const TextStyle(color: Colors.white60, fontSize: 10)),
+          ],
+        ),
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF0F172A)))
           : RefreshIndicator(
         onRefresh: _calculateStats,
         child: ListView(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.all(16),
           children: [
-            const Text('Общие показатели',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                _buildInfoTile(
-                  label: 'Заказов',
-                  value: stats['totalOrders'].toString(),
-                  icon: Icons.shopping_basket_rounded,
-                  color: Colors.blueAccent,
-                ),
-                const SizedBox(width: 16),
-                _buildInfoTile(
-                  label: 'Выручка',
-                  value: '${(stats['totalSum'] as double).toInt()} ₽',
-                  icon: Icons.account_balance_wallet_rounded,
-                  color: Colors.green,
-                ),
-              ],
-            ),
-            const SizedBox(height: 32),
-            _buildSectionTitle('Статусы выполнения'),
-            _buildDetailedCard(
-              data: (stats['statusCounts'] as Map<String, int>),
-              accentColor: Colors.orange,
-            ),
-            const SizedBox(height: 32),
-            _buildSectionTitle('Распределение по типам'),
-            _buildDetailedCard(
-              data: (stats['typeCounts'] as Map<String, int>),
-              accentColor: Colors.indigo,
-            ),
+            _buildHeaderStats(),
+            const SizedBox(height: 24),
+            const Text('Статистика по заведениям',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+            const SizedBox(height: 12),
+
+            if (restaurantStats.isEmpty)
+              const Center(child: Padding(
+                padding: EdgeInsets.only(top: 40),
+                child: Text('Данных пока нет'),
+              ))
+            else
+              ...restaurantStats.entries.map((entry) => _buildExpandableRestaurantCard(entry.key, entry.value)).toList(),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildSectionTitle(String title) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
+  // --- КАРТОЧКА С РАСКРЫВАЮЩИМСЯ СПИСКОМ ---
+  Widget _buildExpandableRestaurantCard(String name, Map<String, dynamic> data) {
+    double sum = data['sum'];
+    int count = data['count'];
+    Map<String, int> statuses = data['statuses'];
+    double percent = totalSum > 0 ? (sum / totalSum) * 100 : 0;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10)],
+      ),
+      child: ExpansionTile(
+        shape: const Border(), // Убираем стандартные границы при раскрытии
+        title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        subtitle: Text('${sum.toInt()} ₽ | $count зак.', style: const TextStyle(fontSize: 13, color: Colors.blueGrey)),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Divider(),
+                const SizedBox(height: 8),
+                const Text('СТАТУСЫ ЗАКАЗОВ:', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1, color: Colors.grey)),
+                const SizedBox(height: 12),
+
+                // Сетка со статусами
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: statuses.entries.map((st) => _buildStatusBadge(st.key, st.value)).toList(),
+                ),
+
+                const SizedBox(height: 20),
+                const Text('ДОЛЯ ОТ ОБЩЕЙ ВЫРУЧКИ:', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1, color: Colors.grey)),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(5),
+                  child: LinearProgressIndicator(
+                    value: percent / 100,
+                    backgroundColor: Colors.grey[100],
+                    color: Colors.blueAccent,
+                    minHeight: 8,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text('${percent.toStringAsFixed(1)}%', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blueAccent)),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildInfoTile({required String label, required String value, required IconData icon, required Color color}) {
+  // Виджет для отдельного статуса (например, "Доставлено: 5")
+  Widget _buildStatusBadge(String status, int count) {
+    Color color;
+    switch (status) {
+      case 'Доставлено': color = Colors.green; break;
+      case 'Отменено': color = Colors.red; break;
+      case 'Новый': color = Colors.orange; break;
+      case 'Готовится': color = Colors.blue; break;
+      case 'В пути': color = Colors.purple; break;
+      default: color = Colors.blueGrey;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(status, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+          const SizedBox(width: 6),
+          Text(count.toString(), style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w900)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeaderStats() {
+    return Row(
+      children: [
+        _buildInfoTile('Заказов', totalOrders.toString(), Icons.receipt, Colors.blueAccent),
+        const SizedBox(width: 12),
+        _buildInfoTile('Оборот', '${totalSum.toInt()} ₽', Icons.wallet, Colors.green),
+      ],
+    );
+  }
+
+  Widget _buildInfoTile(String label, String value, IconData icon, Color color) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(24),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 5))],
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10)],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            CircleAvatar(
-              backgroundColor: color.withOpacity(0.1),
-              radius: 18,
-              child: Icon(icon, color: color, size: 18),
-            ),
-            const SizedBox(height: 16),
-            Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Color(0xFF0F172A))),
-            Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[500], fontWeight: FontWeight.w500)),
+            Icon(icon, color: color, size: 20),
+            const SizedBox(height: 8),
+            Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+            Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildDetailedCard({required Map<String, int> data, required Color accentColor}) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 5))],
-      ),
-      child: Column(
-        children: data.entries.map((e) {
-          return Column(
-            children: [
-              ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-                leading: Icon(Icons.circle, size: 10, color: accentColor.withOpacity(0.6)),
-                title: Text(e.key, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: Color(0xFF1E293B))),
-                trailing: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(10)),
-                  child: Text(e.value.toString(), style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-                ),
-              ),
-              if (e.key != data.keys.last)
-                Divider(height: 1, color: Colors.grey[100], indent: 20, endIndent: 20),
-            ],
-          );
-        }).toList(),
       ),
     );
   }

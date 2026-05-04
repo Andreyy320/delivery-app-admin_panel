@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'admin.dart';
+import 'admin.dart'; // Твой главный экран админки
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -10,17 +10,17 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final TextEditingController phoneController = TextEditingController();
+  final TextEditingController loginController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
   bool loading = false;
 
   void _login() async {
-    final phone = phoneController.text.trim();
+    final login = loginController.text.trim();
     final password = passwordController.text.trim();
 
-    if (phone.isEmpty || password.isEmpty) {
+    if (login.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Введите телефон и пароль')),
+        const SnackBar(content: Text('Введите логин и пароль')),
       );
       return;
     }
@@ -28,16 +28,26 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => loading = true);
 
     try {
+      // ИЩЕМ В БАЗЕ СОВПАДЕНИЕ ПО ЛОГИНУ И ПАРОЛЮ (ОБЫЧНЫЙ ТЕКСТ)
       final snapshot = await FirebaseFirestore.instance
           .collection('admins')
-          .where('phone', isEqualTo: phone)
-          .where('password', isEqualTo: password)
+          .where('login', isEqualTo: login)
+          .where('password', isEqualTo: password) // Сравниваем текст напрямую
           .get();
 
       if (snapshot.docs.isNotEmpty) {
+        final userData = snapshot.docs.first.data();
+        final String adminName = userData['name'] ?? login;
+
         if (!mounted) return;
+
+        // ПЕРЕХОД
         Navigator.pushReplacement(
-            context, MaterialPageRoute(builder: (_) => const AdminHome()));
+            context,
+            MaterialPageRoute(
+              builder: (_) => AdminHome(adminName: adminName),
+            )
+        );
       } else {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -47,7 +57,7 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Ошибка сети: $e')),
+        SnackBar(content: Text('Ошибка сети или базы: $e')),
       );
     } finally {
       if (mounted) setState(() => loading = false);
@@ -57,11 +67,11 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A), // Глубокий темно-синий (Slate 900)
+      backgroundColor: const Color(0xFF0F172A),
       body: Center(
         child: SingleChildScrollView(
           child: Container(
-            width: 400, // Ограничиваем ширину для Web, чтобы не растягивалось
+            width: 400,
             padding: const EdgeInsets.all(32.0),
             decoration: BoxDecoration(
               color: Colors.white,
@@ -77,7 +87,6 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Иконка щита (Символ супер-админа)
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
@@ -97,24 +106,15 @@ class _LoginScreenState extends State<LoginScreen> {
                       color: Color(0xFF0F172A)
                   ),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  'Введите учетные данные для управления системой',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey[600], fontSize: 13),
-                ),
                 const SizedBox(height: 32),
 
-                // Поле Телефон
                 _buildField(
-                  controller: phoneController,
-                  label: 'Номер телефона',
-                  icon: Icons.phone_android_rounded,
-                  type: TextInputType.phone,
+                  controller: loginController,
+                  label: 'Логин',
+                  icon: Icons.person_outline_rounded,
                 ),
                 const SizedBox(height: 16),
 
-                // Поле Пароль
                 _buildField(
                   controller: passwordController,
                   label: 'Пароль доступа',
@@ -123,7 +123,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 32),
 
-                // Кнопка Входа
                 SizedBox(
                   width: double.infinity,
                   height: 55,
@@ -160,7 +159,6 @@ class _LoginScreenState extends State<LoginScreen> {
     required String label,
     required IconData icon,
     bool isPassword = false,
-    TextInputType type = TextInputType.text,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -172,7 +170,6 @@ class _LoginScreenState extends State<LoginScreen> {
         TextField(
           controller: controller,
           obscureText: isPassword,
-          keyboardType: type,
           decoration: InputDecoration(
             prefixIcon: Icon(icon, size: 20, color: const Color(0xFF0F172A)),
             filled: true,
