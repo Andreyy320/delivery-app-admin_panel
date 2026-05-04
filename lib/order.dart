@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import 'dart:async';
 
 class OrdersAdminScreen extends StatefulWidget {
   const OrdersAdminScreen({super.key});
@@ -34,41 +35,53 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
     }
   }
 
-  // --- ПОТОК ВСЕХ ЗАКАЗОВ ИЗ ВСЕХ ПОЛЬЗОВАТЕЛЕЙ ---
-  Stream<List<Map<String, dynamic>>> _getAllOrdersStream() async* {
-    final usersSnapshot = await FirebaseFirestore.instance.collection('users').get();
-    final ordersList = <Map<String, dynamic>>[];
+  // --- УЛУЧШЕННЫЙ ПОТОК ЗАКАЗОВ (REAL-TIME) ---
+  Stream<List<Map<String, dynamic>>> _getAllOrdersStream() {
+    // Слушаем всех пользователей
+    return FirebaseFirestore.instance.collection('users').snapshots().transform(
+      StreamTransformer.fromHandlers(
+        handleData: (usersSnapshot, sink) async {
+          List<Map<String, dynamic>> allOrders = [];
 
-    for (var userDoc in usersSnapshot.docs) {
-      final userData = userDoc.data();
-      final userName = userData['name'] ?? '-';
-      final userPhone = userData['phone'] ?? '-';
+          for (var userDoc in usersSnapshot.docs) {
+            final userData = userDoc.data();
+            final userName = userData['name'] ?? 'Без имени';
+            final userPhone = userData['phone'] ?? '-';
 
-      final ordersSnapshot = await userDoc.reference.collection('orders').get();
-      for (var orderDoc in ordersSnapshot.docs) {
-        final orderData = orderDoc.data();
-        orderData['clientName'] = userName;
-        orderData['clientPhone'] = userPhone;
-        orderData['userId'] = userDoc.id; // ID клиента для обновления
-        orderData['orderId'] = orderDoc.id; // ID заказа для обновления
+            // Получаем снимки заказов (get здесь заменен на логику обработки во внешнем стриме для простоты,
+            // но для полной реактивности заказов лучше оставить подписку)
+            final ordersSnapshot = await userDoc.reference.collection('orders').get();
 
-        if (!orderData.containsKey('total')) {
-          final items = (orderData['items'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
-          double total = 0;
-          for (var item in items) {
-            total += (item['price'] ?? 0) * (item['quantity'] ?? 1);
+            for (var orderDoc in ordersSnapshot.docs) {
+              final orderData = orderDoc.data();
+
+              orderData['orderId'] = orderDoc.id;
+              orderData['userId'] = userDoc.id;
+              orderData['clientName'] ??= userName;
+              orderData['clientPhone'] ??= userPhone;
+
+              if (orderData['total'] == null) {
+                final items = (orderData['items'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
+                double total = 0;
+                for (var item in items) {
+                  total += (item['price'] ?? 0) * (item['quantity'] ?? 1);
+                }
+                orderData['total'] = total;
+              }
+              allOrders.add(orderData);
+            }
           }
-          orderData['total'] = total;
-        }
-        ordersList.add(orderData);
-      }
-    }
-    ordersList.sort((a, b) {
-      final aTime = a['createdAt'] is Timestamp ? (a['createdAt'] as Timestamp).toDate() : DateTime(2000);
-      final bTime = b['createdAt'] is Timestamp ? (b['createdAt'] as Timestamp).toDate() : DateTime(2000);
-      return bTime.compareTo(aTime);
-    });
-    yield ordersList;
+
+          allOrders.sort((a, b) {
+            final aTime = a['createdAt'] is Timestamp ? (a['createdAt'] as Timestamp).toDate() : DateTime(2000);
+            final bTime = b['createdAt'] is Timestamp ? (b['createdAt'] as Timestamp).toDate() : DateTime(2000);
+            return bTime.compareTo(aTime);
+          });
+
+          sink.add(allOrders);
+        },
+      ),
+    );
   }
 
   // --- ЛОГИКА НАЗНАЧЕНИЯ КУРЬЕРА ---
@@ -83,28 +96,29 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
         'courierId': cId,
         'courierName': cName,
         'courierPhone': cPhone,
-        'status': 'accepted', // Меняем статус на Принято
+        'status': 'accepted',
         'statusUpdatedAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
       });
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Курьер $cName назначен!')),
+          SnackBar(content: Text('Курьер $cName успешно назначен!')),
         );
-        setState(() {}); // Обновляем список
       }
     } catch (e) {
-      debugPrint('Ошибка назначения: $e');
+      debugPrint('Ошибка назначения курьера: $e');
     }
   }
 
   // --- ДИАЛОГ ВЫБОРА КУРЬЕРА ---
   void _showAssignCourierDialog(String userId, String orderId) {
+    if (userId.isEmpty || orderId.isEmpty) return;
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Назначить курьера принудительно'),
+        title: const Text('Выбор курьера'),
         content: SizedBox(
           width: double.maxFinite,
           child: StreamBuilder<QuerySnapshot>(
@@ -113,22 +127,25 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
                 .where('active', isEqualTo: true)
                 .snapshots(),
             builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-              final docs = snapshot.data?.docs ?? [];
-              if (docs.isEmpty) return const Text('Нет активных курьеров в сети');
+              if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+              final docs = snapshot.data!.docs;
+              if (docs.isEmpty) return const Text('Нет активных курьеров');
 
               return ListView.builder(
                 shrinkWrap: true,
                 itemCount: docs.length,
                 itemBuilder: (context, index) {
                   final c = docs[index].data() as Map<String, dynamic>;
+                  final name = c['name'] ?? 'Без имени';
+                  final phone = c['phone'] ?? '-';
+
                   return ListTile(
-                    leading: const CircleAvatar(backgroundColor: Colors.orange, child: Icon(Icons.delivery_dining, color: Colors.white)),
-                    title: Text(c['name'] ?? 'Курьер'),
-                    subtitle: Text(c['phone'] ?? ''),
+                    leading: const Icon(Icons.delivery_dining, color: Colors.orange),
+                    title: Text(name),
+                    subtitle: Text(phone),
                     onTap: () {
                       Navigator.pop(context);
-                      _assignCourier(userId, orderId, docs[index].id, c['name'], c['phone']);
+                      _assignCourier(userId, orderId, docs[index].id, name, phone);
                     },
                   );
                 },
@@ -140,6 +157,14 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
     );
   }
 
+  Color _statusColor(String status) {
+    final s = status.toLowerCase().replaceAll('_', '').trim();
+    if (s == 'completed' || s == 'delivered' || s == 'ready') return Colors.green;
+    if (s == 'cancelled' || s == 'canceled' || s == 'отменено') return Colors.red;
+    if (s == 'pending' || s == 'new' || s == 'accepted' || s == 'принято') return Colors.orange;
+    return Colors.blueGrey;
+  }
+
   List<Map<String, dynamic>> _applyFilter(List<Map<String, dynamic>> allOrders) {
     return allOrders.where((order) {
       final name = (order['clientName'] ?? '').toString().toLowerCase();
@@ -149,7 +174,7 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
       bool matchesStatus = filterStatus == 'all';
       if (!matchesStatus) {
         if (filterStatus == 'pending') {
-          matchesStatus = (statusFromDb == 'pending' || statusFromDb == 'new' || statusFromDb == 'accepted');
+          matchesStatus = (statusFromDb == 'pending' || statusFromDb == 'new' || statusFromDb == 'accepted' || statusFromDb == 'принято' || statusFromDb == 'inprogress');
         } else if (filterStatus == 'completed') {
           matchesStatus = (statusFromDb == 'completed' || statusFromDb == 'delivered' || statusFromDb == 'ready');
         } else if (filterStatus == 'cancelled') {
@@ -160,50 +185,34 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
     }).toList();
   }
 
-  Color _statusColor(String status) {
-    final s = status.toLowerCase().replaceAll('_', '').trim();
-    if (s == 'completed' || s == 'delivered' || s == 'ready') return Colors.green;
-    if (s == 'cancelled' || s == 'canceled' || s == 'отменено') return Colors.red;
-    if (s == 'pending' || s == 'new' || s == 'accepted' || s == 'принято') return Colors.orange;
-    return Colors.blueGrey;
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        elevation: 0,
         backgroundColor: const Color(0xFF0F172A),
-        iconTheme: const IconThemeData(color: Colors.white),
-        title: const Text('УПРАВЛЕНИЕ ЗАКАЗАМИ',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14, letterSpacing: 1)),
+        title: const Text('ЗАКАЗЫ (АДМИН)', style: TextStyle(color: Colors.white, fontSize: 16)),
       ),
       body: Column(
         children: [
           Container(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
-            decoration: const BoxDecoration(
-              color: Color(0xFF0F172A),
-              borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
-            ),
+            color: const Color(0xFF0F172A),
+            padding: const EdgeInsets.all(16),
             child: Column(
               children: [
                 TextField(
                   controller: searchController,
                   style: const TextStyle(color: Colors.white),
                   decoration: InputDecoration(
+                    hintText: 'Поиск клиента...',
+                    hintStyle: const TextStyle(color: Colors.white54),
+                    prefixIcon: const Icon(Icons.search, color: Colors.white54),
                     filled: true,
                     fillColor: Colors.white.withOpacity(0.1),
-                    prefixIcon: const Icon(Icons.search, color: Colors.white60),
-                    hintText: 'Поиск по клиенту...',
-                    hintStyle: const TextStyle(color: Colors.white60),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
-                    contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                   ),
-                  onChanged: (value) => setState(() => searchQuery = value),
+                  onChanged: (v) => setState(() => searchQuery = v),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
                 _buildStatusChips(),
               ],
             ),
@@ -213,14 +222,13 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
               stream: _getAllOrdersStream(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-                final filteredOrders = _applyFilter(snapshot.data ?? []);
-                return RefreshIndicator(
-                  onRefresh: () async => setState(() {}),
-                  child: ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: filteredOrders.length,
-                    itemBuilder: (context, index) => _buildOrderCard(filteredOrders[index]),
-                  ),
+                final data = _applyFilter(snapshot.data ?? []);
+                if (data.isEmpty) return const Center(child: Text('Заказов не найдено'));
+
+                return ListView.builder(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: data.length,
+                  itemBuilder: (context, index) => _buildOrderCard(data[index]),
                 );
               },
             ),
@@ -231,64 +239,64 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
   }
 
   Widget _buildStatusChips() {
-    final statuses = [
-      {'id': 'all', 'label': 'Все'},
-      {'id': 'pending', 'label': 'Активные'},
-      {'id': 'completed', 'label': 'Завершено'},
-      {'id': 'cancelled', 'label': 'Отмена'},
+    final types = [
+      {'id': 'all', 'name': 'Все'},
+      {'id': 'pending', 'name': 'Активные'},
+      {'id': 'completed', 'name': 'Выполнены'},
+      {'id': 'cancelled', 'name': 'Отмена'},
     ];
-    return Row(
-      children: statuses.map((s) {
-        bool isSelected = filterStatus == s['id'];
-        return Padding(
-          padding: const EdgeInsets.only(right: 8),
-          child: ChoiceChip(
-            label: Text(s['label']!, style: TextStyle(color: isSelected ? Colors.white : Colors.white70, fontSize: 12)),
-            selected: isSelected,
-            onSelected: (v) => setState(() => filterStatus = s['id']!),
-            selectedColor: Colors.blueAccent,
-            backgroundColor: const Color(0xFF1E293B),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            showCheckmark: false,
-          ),
-        );
-      }).toList(),
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: types.map((t) {
+          final isSel = filterStatus == t['id'];
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ChoiceChip(
+              label: Text(t['name']!, style: TextStyle(color: isSel ? Colors.white : Colors.white70)),
+              selected: isSel,
+              selectedColor: Colors.blueAccent,
+              backgroundColor: const Color(0xFF1E293B),
+              onSelected: (v) => setState(() => filterStatus = t['id']!),
+            ),
+          );
+        }).toList(),
+      ),
     );
   }
 
   Widget _buildOrderCard(Map<String, dynamic> order) {
-    final status = order['status'] ?? '-';
+    final status = (order['status'] ?? 'new').toString();
     final color = _statusColor(status);
-    final total = order['total'] ?? 0;
-    final items = (order['items'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
-    final bool hasCourier = order['courierId'] != null;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10)],
-      ),
+    final String? courierId = order['courierId'];
+    // Приоритет: Имя -> Телефон -> Заглушка
+    final String courierDisplay = order['courierName'] ?? order['courierPhone'] ?? 'НЕ НАЗНАЧЕН';
+
+    final userId = order['userId'] ?? '';
+    final orderId = order['orderId'] ?? '';
+
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+      margin: const EdgeInsets.only(bottom: 12),
       child: ExpansionTile(
-        leading: CircleAvatar(backgroundColor: color.withOpacity(0.1), child: Icon(Icons.shopping_bag, color: color, size: 20)),
-        title: Text(order['clientName'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-        subtitle: Text(_translateStatus(status).toUpperCase(), style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
+        title: Text(order['clientName'] ?? 'Клиент', style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Text(_translateStatus(status), style: TextStyle(color: color, fontWeight: FontWeight.bold)),
         children: [
           Padding(
-            padding: const EdgeInsets.all(16.0),
+            padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _infoRow(Icons.phone, 'Клиент:', order['clientPhone']),
-                if (hasCourier) _infoRow(Icons.delivery_dining, 'Курьер:', '${order['courierName']}'),
+                _infoRow(Icons.phone, 'Клиент:', order['clientPhone'] ?? '-'),
+                _infoRow(Icons.delivery_dining, 'Курьер:', courierDisplay),
                 const Divider(),
-                ...items.map((item) => Padding(
+                ...(order['items'] as List? ?? []).map((item) => Padding(
                   padding: const EdgeInsets.symmetric(vertical: 2),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('${item['name']} x${item['quantity']}', style: const TextStyle(fontSize: 13)),
+                      Text('${item['name']} x${item['quantity']}'),
                       Text('${((item['price'] ?? 0) * (item['quantity'] ?? 1)).toInt()} ₽'),
                     ],
                   ),
@@ -298,20 +306,21 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     const Text('ИТОГО:', style: TextStyle(fontWeight: FontWeight.bold)),
-                    Text('${total.toInt()} ₽', style: TextStyle(fontWeight: FontWeight.bold, color: color, fontSize: 18)),
+                    Text('${(order['total'] ?? 0).toInt()} ₽', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   ],
                 ),
-                const SizedBox(height: 16),
-
-                // КНОПКА НАЗНАЧЕНИЯ (показывается только если курьера нет и заказ активен)
-                if (!hasCourier && (status == 'new' || status == 'pending' || status == 'принято'))
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () => _showAssignCourierDialog(order['userId'], order['orderId']),
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
-                      icon: const Icon(Icons.person_add),
-                      label: const Text('НАЗНАЧИТЬ КУРЬЕРА'),
+                if ((courierId == null || courierId == 'courierId' || courierId.isEmpty) &&
+                    status != 'delivered' && status != 'cancelled')
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () => _showAssignCourierDialog(userId, orderId),
+                        icon: const Icon(Icons.person_add),
+                        label: const Text('НАЗНАЧИТЬ КУРЬЕРА'),
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
+                      ),
                     ),
                   ),
               ],
@@ -323,15 +332,12 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
   }
 
   Widget _infoRow(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        children: [
-          Icon(icon, size: 14, color: Colors.grey),
-          const SizedBox(width: 8),
-          Text('$label $value', style: const TextStyle(fontSize: 12)),
-        ],
-      ),
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: Colors.grey),
+        const SizedBox(width: 5),
+        Text('$label $value', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+      ],
     );
   }
 }
