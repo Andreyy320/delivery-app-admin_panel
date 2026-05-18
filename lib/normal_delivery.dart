@@ -21,7 +21,7 @@ class _AllCourierOrdersScreenState extends State<AllCourierOrdersScreen> {
     if (s == 'inprogress' || s == 'впути') return 'В пути';
     if (s == 'delivered' || s == 'delivery' || s == 'доставлено') return 'Доставлен';
     if (s == 'cancelled' || s == 'отменено') return 'Отменен';
-    if (s == 'ready' || s=='READY') return 'Готов';
+    if (s == 'ready' || s == 'READY') return 'Готов';
     return status;
   }
 
@@ -44,6 +44,7 @@ class _AllCourierOrdersScreenState extends State<AllCourierOrdersScreen> {
         for (var orderDoc in ordersSnapshot.docs) {
           final data = orderDoc.data();
           data['userId'] = userDoc.id;
+          data['orderId'] = orderDoc.id; // Добавлено для точности
           if (data['type'] == null) data['type'] = 'normal';
           userOrders.add(data);
         }
@@ -100,18 +101,17 @@ class _AllCourierOrdersScreenState extends State<AllCourierOrdersScreen> {
   }
 
   double getOrderPrice(Map<String, dynamic> order) {
+    if (order['total'] != null) return (order['total'] as num).toDouble();
     if (order['totalPrice'] != null) return (order['totalPrice'] as num).toDouble();
     if (order['totalCost'] != null) return (order['totalCost'] as num).toDouble();
-    if (order['total'] != null) return (order['total'] as num).toDouble();
-    if (order['items'] != null) {
-      final items = order['items'] as List<dynamic>;
-      double sum = 0;
-      for (var item in items) {
-        sum += (item['price'] ?? 0) * (item['quantity'] ?? 1);
-      }
-      return sum;
+
+    final items = order['items'] as List<dynamic>? ?? [];
+    double sum = 0;
+    for (var item in items) {
+      sum += (item['price'] ?? 0) * (item['quantity'] ?? 1);
     }
-    return 0;
+    final delivery = (order['deliveryPrice'] ?? 0) as num;
+    return sum + delivery.toDouble();
   }
 
   @override
@@ -189,7 +189,6 @@ class _AllCourierOrdersScreenState extends State<AllCourierOrdersScreen> {
           return Padding(
             padding: const EdgeInsets.only(right: 8, bottom: 4),
             child: ChoiceChip(
-              // Текст теперь всегда яркий и читаемый
               label: Text(
                 item['label']!,
                 style: TextStyle(
@@ -200,17 +199,10 @@ class _AllCourierOrdersScreenState extends State<AllCourierOrdersScreen> {
               ),
               selected: selected,
               onSelected: (v) => setState(() => isStatus ? filterStatus = item['id']! : filterType = item['id']!),
-
-              // Активная кнопка — насыщенный синий
               selectedColor: Colors.blueAccent[700],
-
-              // Неактивная кнопка — глубокий темный (чтобы не сливалось с фоном шапки)
               backgroundColor: const Color(0xFF1E293B),
-
               showCheckmark: false,
               elevation: selected ? 4 : 0,
-
-              // Четкая рамка, чтобы кнопки были визуально отделены
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
                 side: BorderSide(
@@ -224,6 +216,7 @@ class _AllCourierOrdersScreenState extends State<AllCourierOrdersScreen> {
       ),
     );
   }
+
   Widget _buildOrderCard(Map<String, dynamic> order) {
     final status = (order['status'] ?? '-').toString();
     final type = (order['type'] ?? 'normal').toString();
@@ -256,7 +249,7 @@ class _AllCourierOrdersScreenState extends State<AllCourierOrdersScreen> {
                   children: [
                     Text(order['clientName'] ?? 'Без имени', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1E293B))),
                     const SizedBox(height: 4),
-                    Text('${_translateType(type)} • ${price.toInt()} ₽', style: TextStyle(color: Colors.grey[500], fontSize: 13)),
+                    Text('${_translateType(type)} • ${price.toInt()} Руб', style: TextStyle(color: Colors.grey[500], fontSize: 13)),
                   ],
                 ),
               ),
@@ -277,14 +270,13 @@ class OrderDetailsScreen extends StatelessWidget {
   final Map<String, dynamic> order;
   const OrderDetailsScreen({super.key, required this.order});
 
-  // Локальные методы перевода для деталей
   String _ruStatus(String s) {
     final status = s.toLowerCase().replaceAll('_', '');
     if (status == 'accepted') return 'ПРИНЯТ';
-    if (status == 'READY') return 'ГОТОВ';
+    if (status == 'READY' || status == 'ready') return 'ГОТОВ';
     if (status == 'inprogress') return 'В ПУТИ';
     if (status == 'delivered' || status == 'delivery') return 'ДОСТАВЛЕН';
-    if (status == 'canceled') return 'ОТМЕНЕН';
+    if (status == 'canceled' || status == 'cancelled') return 'ОТМЕНЕН';
     return s.toUpperCase();
   }
 
@@ -300,10 +292,13 @@ class OrderDetailsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = order['items'] as List<dynamic>? ?? [];
-    double total = 0;
-    if (order['totalPrice'] != null) total = (order['totalPrice'] as num).toDouble();
-    else if (order['totalCost'] != null) total = (order['totalCost'] as num).toDouble();
-    else { for (var i in items) total += (i['price'] ?? 0) * (i['quantity'] ?? 1); }
+    double productsSum = 0;
+    for (var i in items) {
+      productsSum += (i['price'] ?? 0) * (i['quantity'] ?? 1);
+    }
+
+    final double deliveryFee = (order['deliveryPrice'] ?? 0).toDouble();
+    final double total = (order['total'] ?? order['totalPrice'] ?? (productsSum + deliveryFee)).toDouble();
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -329,7 +324,10 @@ class OrderDetailsScreen extends StatelessWidget {
           ]),
           const SizedBox(height: 16),
           _card(title: 'ОПЛАТА', children: [
-            _row('Итого', '${total.toInt()} ₽', isBold: true, color: Colors.green),
+            _row('Товары', '${productsSum.toInt()} Руб'),
+            _row('Доставка', '${deliveryFee.toInt()} Руб', color: Colors.blueGrey),
+            const Divider(height: 20),
+            _row('ИТОГО', '${total.toInt()}Руб', isBold: true, color: Colors.green),
           ]),
           if (items.isNotEmpty) ...[
             const SizedBox(height: 16),
@@ -337,7 +335,13 @@ class OrderDetailsScreen extends StatelessWidget {
               for (var i in items)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Text('• ${i['name']} x${i['quantity']}', style: const TextStyle(fontSize: 14)),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('• ${i['name']} x${i['quantity']}', style: const TextStyle(fontSize: 14)),
+                      Text('${((i['price'] ?? 0) * (i['quantity'] ?? 1)).toInt()} Руб', style: const TextStyle(fontSize: 14, color: Colors.grey)),
+                    ],
+                  ),
                 ),
             ]),
           ],
@@ -349,7 +353,11 @@ class OrderDetailsScreen extends StatelessWidget {
   Widget _card({String? title, required List<Widget> children}) {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24)),
+      decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10)]
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

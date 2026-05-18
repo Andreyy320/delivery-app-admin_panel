@@ -37,7 +37,6 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
 
   // --- УЛУЧШЕННЫЙ ПОТОК ЗАКАЗОВ (REAL-TIME) ---
   Stream<List<Map<String, dynamic>>> _getAllOrdersStream() {
-    // Слушаем всех пользователей
     return FirebaseFirestore.instance.collection('users').snapshots().transform(
       StreamTransformer.fromHandlers(
         handleData: (usersSnapshot, sink) async {
@@ -48,8 +47,6 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
             final userName = userData['name'] ?? 'Без имени';
             final userPhone = userData['phone'] ?? '-';
 
-            // Получаем снимки заказов (get здесь заменен на логику обработки во внешнем стриме для простоты,
-            // но для полной реактивности заказов лучше оставить подписку)
             final ordersSnapshot = await userDoc.reference.collection('orders').get();
 
             for (var orderDoc in ordersSnapshot.docs) {
@@ -190,6 +187,7 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: const Color(0xFF0F172A),
+        iconTheme: const IconThemeData(color: Colors.white),
         title: const Text('ЗАКАЗЫ (АДМИН)', style: TextStyle(color: Colors.white, fontSize: 16)),
       ),
       body: Column(
@@ -270,11 +268,19 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
     final color = _statusColor(status);
 
     final String? courierId = order['courierId'];
-    // Приоритет: Имя -> Телефон -> Заглушка
     final String courierDisplay = order['courierName'] ?? order['courierPhone'] ?? 'НЕ НАЗНАЧЕН';
 
     final userId = order['userId'] ?? '';
     final orderId = order['orderId'] ?? '';
+
+    // 🔹 Расчет цен
+    final items = (order['items'] as List? ?? []);
+    double productsTotal = 0;
+    for (var item in items) {
+      productsTotal += (item['price'] ?? 0) * (item['quantity'] ?? 1);
+    }
+    final double deliveryFee = (order['deliveryPrice'] ?? 0).toDouble();
+    final double totalCheck = (order['total'] ?? (productsTotal + deliveryFee)).toDouble();
 
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
@@ -291,35 +297,58 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
                 _infoRow(Icons.phone, 'Клиент:', order['clientPhone'] ?? '-'),
                 _infoRow(Icons.delivery_dining, 'Курьер:', courierDisplay),
                 const Divider(),
-                ...(order['items'] as List? ?? []).map((item) => Padding(
+                const Text('ТОВАРЫ:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey)),
+                const SizedBox(height: 5),
+                ...items.map((item) => Padding(
                   padding: const EdgeInsets.symmetric(vertical: 2),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('${item['name']} x${item['quantity']}'),
-                      Text('${((item['price'] ?? 0) * (item['quantity'] ?? 1)).toInt()} ₽'),
+                      Text('${item['name']} x${item['quantity']}', style: const TextStyle(fontSize: 13)),
+                      Text('${((item['price'] ?? 0) * (item['quantity'] ?? 1)).toInt()} Руб', style: const TextStyle(fontSize: 13)),
                     ],
                   ),
                 )),
                 const Divider(),
+                // 🔹 Отображение разделения цены
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('ИТОГО:', style: TextStyle(fontWeight: FontWeight.bold)),
-                    Text('${(order['total'] ?? 0).toInt()} ₽', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const Text('Сумма товаров:', style: TextStyle(fontSize: 13, color: Colors.black54)),
+                    Text('${productsTotal.toInt()} Руб', style: const TextStyle(fontSize: 13)),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Доход курьера:', style: TextStyle(fontSize: 13, color: Colors.green, fontWeight: FontWeight.w600)),
+                    Text('${deliveryFee.toInt()} Руб', style: const TextStyle(fontSize: 13, color: Colors.green, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('ОБЩИЙ ЧЕК:', style: TextStyle(fontWeight: FontWeight.bold)),
+                    Text('${totalCheck.toInt()} Руб', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Color(0xFF0F172A))),
                   ],
                 ),
                 if ((courierId == null || courierId == 'courierId' || courierId.isEmpty) &&
                     status != 'delivered' && status != 'cancelled')
                   Padding(
-                    padding: const EdgeInsets.only(top: 10),
+                    padding: const EdgeInsets.only(top: 15),
                     child: SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
                         onPressed: () => _showAssignCourierDialog(userId, orderId),
                         icon: const Icon(Icons.person_add),
                         label: const Text('НАЗНАЧИТЬ КУРЬЕРА'),
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.orange,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))
+                        ),
                       ),
                     ),
                   ),
@@ -332,12 +361,17 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
   }
 
   Widget _infoRow(IconData icon, String label, String value) {
-    return Row(
-      children: [
-        Icon(icon, size: 16, color: Colors.grey),
-        const SizedBox(width: 5),
-        Text('$label $value', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-      ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: Colors.grey),
+          const SizedBox(width: 8),
+          Text(label, style: const TextStyle(fontSize: 13, color: Colors.grey)),
+          const SizedBox(width: 4),
+          Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+        ],
+      ),
     );
   }
 }
