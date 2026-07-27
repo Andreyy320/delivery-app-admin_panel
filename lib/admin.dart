@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'Ypravlenie_zavedeniem.dart';
 import 'user.dart';
 import 'create_edit_order_screen.dart';
 import 'normal_delivery.dart';
@@ -78,7 +79,7 @@ class AdminHome extends StatelessWidget {
                 crossAxisSpacing: 16,
                 childAspectRatio: 0.85,
                 children: [
-                  // 1. ЗАЯВКИ (Исправлено: теперь передаем adminName)
+                  // 1. ЗАЯВКИ
                   _buildCard(
                       context,
                       'Заявки',
@@ -136,6 +137,16 @@ class AdminHome extends StatelessWidget {
                       Colors.blueGrey,
                       const AdminLogsScreen(),
                       'История админов'
+                  ),
+
+                  // 7. НОВАЯ КАРТОЧКА: Управление заведениями
+                  _buildCard(
+                      context,
+                      'Магазины', // Название карточки
+                      Icons.storefront_rounded, // Иконка
+                      Colors.orange, // Цвет акцента
+                      AdminShopsScreen(currentAdminName: adminName), // Передаем обязательный параметр
+                      'Вкл / Выкл' // Подпись
                   ),
                 ],
               ),

@@ -418,6 +418,8 @@ class AdminRequestsScreen extends StatelessWidget {
           'address': data['address'] ?? '',
           'lat': data['lat'],
           'lng': data['lng'],
+          'isActive': true, // <--- Изначально включено (активно) в системе
+          'isOnline': true,  // <--- Для полной совместимости со списками
         });
 
         batch.update(requestRef, {
