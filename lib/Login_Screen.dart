@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:http/http.dart' as http;
 import 'admin.dart'; // Твой главный экран админки
+import 'api.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -13,6 +15,13 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController loginController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
   bool loading = false;
+
+  @override
+  void dispose() {
+    loginController.dispose();
+    passwordController.dispose();
+    super.dispose();
+  }
 
   void _login() async {
     final login = loginController.text.trim();
@@ -28,36 +37,35 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => loading = true);
 
     try {
-      // ИЩЕМ В БАЗЕ СОВПАДЕНИЕ ПО ЛОГИНУ И ПАРОЛЮ (ОБЫЧНЫЙ ТЕКСТ)
-      final snapshot = await FirebaseFirestore.instance
-          .collection('admins')
-          .where('login', isEqualTo: login)
-          .where('password', isEqualTo: password) // Сравниваем текст напрямую
-          .get();
+      final response = await http
+          .post(
+        Uri.parse('${Api.baseUrl}/api/admin/login'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'login': login, 'password': password}),
+      )
+          .timeout(const Duration(seconds: 15));
 
-      if (snapshot.docs.isNotEmpty) {
-        final userData = snapshot.docs.first.data();
-        final String adminName = userData['name'] ?? login;
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      if (!mounted) return;
 
-        if (!mounted) return;
+      if (response.statusCode == 200 && body['success'] == true) {
+        Api.token = body['token'] as String;
+        final admin = body['admin'] as Map<String, dynamic>;
+        final adminName = (admin['name'] ?? login).toString();
 
-        // ПЕРЕХОД
         Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (_) => AdminHome(adminName: adminName),
-            )
+          context,
+          MaterialPageRoute(builder: (_) => AdminHome(adminName: adminName)),
         );
       } else {
-        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Доступ запрещен: неверные данные')),
+          SnackBar(content: Text(body['error']?.toString() ?? 'Доступ запрещён')),
         );
       }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Ошибка сети или базы: $e')),
+        SnackBar(content: Text('Нет связи с сервером: $e')),
       );
     } finally {
       if (mounted) setState(() => loading = false);
@@ -103,18 +111,15 @@ class _LoginScreenState extends State<LoginScreen> {
                       fontSize: 22,
                       fontWeight: FontWeight.w900,
                       letterSpacing: 1.5,
-                      color: Color(0xFF0F172A)
-                  ),
+                      color: Color(0xFF0F172A)),
                 ),
                 const SizedBox(height: 32),
-
                 _buildField(
                   controller: loginController,
                   label: 'Логин',
                   icon: Icons.person_outline_rounded,
                 ),
                 const SizedBox(height: 16),
-
                 _buildField(
                   controller: passwordController,
                   label: 'Пароль доступа',
@@ -122,7 +127,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   isPassword: true,
                 ),
                 const SizedBox(height: 32),
-
                 SizedBox(
                   width: double.infinity,
                   height: 55,
@@ -140,10 +144,11 @@ class _LoginScreenState extends State<LoginScreen> {
                         ? const SizedBox(
                         height: 20,
                         width: 20,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
-                    )
+                        child: CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 2))
                         : const Text('АВТОРИЗОВАТЬСЯ',
-                        style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1)),
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, letterSpacing: 1)),
                   ),
                 ),
               ],
@@ -165,11 +170,13 @@ class _LoginScreenState extends State<LoginScreen> {
       children: [
         Padding(
           padding: const EdgeInsets.only(left: 4, bottom: 6),
-          child: Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+          child: Text(label,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
         ),
         TextField(
           controller: controller,
           obscureText: isPassword,
+          onSubmitted: (_) => loading ? null : _login(),
           decoration: InputDecoration(
             prefixIcon: Icon(icon, size: 20, color: const Color(0xFF0F172A)),
             filled: true,

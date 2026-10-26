@@ -7,6 +7,7 @@ import 'order.dart';
 import 'Login_Screen.dart';
 import 'admin_requests_screen.dart';
 import 'admin_logs_screen.dart';
+import 'api.dart';
 
 class AdminHome extends StatelessWidget {
   final String adminName; // Имя админа (например, "Andrey")
@@ -53,8 +54,12 @@ class AdminHome extends StatelessWidget {
           ),
           IconButton(
             icon: const Icon(Icons.logout_rounded, color: Colors.redAccent),
-            onPressed: () => Navigator.pushReplacement(
-                context, MaterialPageRoute(builder: (_) => const LoginScreen())),
+            onPressed: () {
+              // Сбрасываем токен при выходе
+              Api.token = null;
+              Navigator.pushReplacement(
+                  context, MaterialPageRoute(builder: (_) => const LoginScreen()));
+            },
           ),
         ],
       ),
@@ -99,14 +104,14 @@ class AdminHome extends StatelessWidget {
                       'Управление'
                   ),
 
-                  // 3. МАГАЗИНЫ
+                  // 3. ЗАКАЗЫ
                   _buildCard(
                       context,
-                      'Магазины',
-                      Icons.storefront_rounded,
+                      'Заказы',
+                      Icons.receipt_long_rounded,
                       Colors.orange,
                       const OrdersAdminScreen(),
-                      'Заказы'
+                      'Все заказы'
                   ),
 
                   // 4. ЛОГИСТИКА
@@ -139,14 +144,14 @@ class AdminHome extends StatelessWidget {
                       'История админов'
                   ),
 
-                  // 7. НОВАЯ КАРТОЧКА: Управление заведениями
+                  // 7. ЗАВЕДЕНИЯ
                   _buildCard(
                       context,
-                      'Магазины', // Название карточки
-                      Icons.storefront_rounded, // Иконка
-                      Colors.orange, // Цвет акцента
-                      AdminShopsScreen(currentAdminName: adminName), // Передаем обязательный параметр
-                      'Вкл / Выкл' // Подпись
+                      'Заведения',
+                      Icons.storefront_rounded,
+                      Colors.deepOrange,
+                      AdminShopsScreen(currentAdminName: adminName),
+                      'Вкл / Выкл'
                   ),
                 ],
               ),
