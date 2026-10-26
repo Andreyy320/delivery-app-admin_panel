@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'admin.dart'; // Твой главный экран админки
+import 'admin.dart';
 import 'api.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -12,29 +12,41 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  static const _bg = Color(0xFFF5F5F3);
+  static const _ink = Color(0xFF16181D);
+  static const _muted = Color(0xFF7B808A);
+  static const _line = Color(0xFFE2E3E6);
+  static const _accent = Color(0xFFF26B1D);
+
   final TextEditingController loginController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
+  final FocusNode _passwordFocus = FocusNode();
+
   bool loading = false;
+  bool _obscure = true;
+  String? _error;
 
   @override
   void dispose() {
     loginController.dispose();
     passwordController.dispose();
+    _passwordFocus.dispose();
     super.dispose();
   }
 
-  void _login() async {
+  Future<void> _login() async {
     final login = loginController.text.trim();
     final password = passwordController.text.trim();
 
     if (login.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Введите логин и пароль')),
-      );
+      setState(() => _error = 'Введите логин и пароль');
       return;
     }
 
-    setState(() => loading = true);
+    setState(() {
+      loading = true;
+      _error = null;
+    });
 
     try {
       final response = await http
@@ -51,7 +63,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (response.statusCode == 200 && body['success'] == true) {
         final admin = body['admin'] as Map<String, dynamic>;
         final adminName = (admin['name'] ?? login).toString();
-        await Api.saveSession(body['token'] as String, adminName); // запоминаем вход
+        await Api.saveSession(body['token'] as String, adminName);
         if (!mounted) return;
 
         Navigator.pushReplacement(
@@ -59,15 +71,11 @@ class _LoginScreenState extends State<LoginScreen> {
           MaterialPageRoute(builder: (_) => AdminHome(adminName: adminName)),
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(body['error']?.toString() ?? 'Доступ запрещён')),
-        );
+        setState(() => _error = body['error']?.toString() ?? 'Доступ запрещён');
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Нет связи с сервером: $e')),
-      );
+      setState(() => _error = 'Нет связи с сервером');
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -76,83 +84,117 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
-      body: Center(
-        child: SingleChildScrollView(
-          child: Container(
-            width: 400,
-            padding: const EdgeInsets.all(32.0),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(28),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.3),
-                  blurRadius: 20,
-                  offset: const Offset(0, 10),
-                )
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0F172A).withOpacity(0.05),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.admin_panel_settings_rounded,
-                      size: 48, color: Color(0xFF0F172A)),
-                ),
-                const SizedBox(height: 24),
-                const Text(
-                  'ADMIN CONSOLE',
-                  style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 1.5,
-                      color: Color(0xFF0F172A)),
-                ),
-                const SizedBox(height: 32),
-                _buildField(
-                  controller: loginController,
-                  label: 'Логин',
-                  icon: Icons.person_outline_rounded,
-                ),
-                const SizedBox(height: 16),
-                _buildField(
-                  controller: passwordController,
-                  label: 'Пароль доступа',
-                  icon: Icons.lock_open_rounded,
-                  isPassword: true,
-                ),
-                const SizedBox(height: 32),
-                SizedBox(
-                  width: double.infinity,
-                  height: 55,
-                  child: ElevatedButton(
-                    onPressed: loading ? null : _login,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF0F172A),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
+      backgroundColor: _bg,
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 380),
+              child: AutofillGroup(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      'Вход',
+                      style: TextStyle(
+                        fontSize: 40,
+                        fontWeight: FontWeight.w800,
+                        color: _ink,
+                        height: 1.05,
                       ),
-                      elevation: 0,
                     ),
-                    child: loading
-                        ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2))
-                        : const Text('АВТОРИЗОВАТЬСЯ',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, letterSpacing: 1)),
-                  ),
+                    const SizedBox(height: 10),
+                    const Text(
+                      'Панель управления доставкой',
+                      style: TextStyle(fontSize: 16, color: _muted),
+                    ),
+                    const SizedBox(height: 40),
+                    TextField(
+                      controller: loginController,
+                      enabled: !loading,
+                      autofocus: true,
+                      autocorrect: false,
+                      enableSuggestions: false,
+                      textInputAction: TextInputAction.next,
+                      autofillHints: const [AutofillHints.username],
+                      onSubmitted: (_) => _passwordFocus.requestFocus(),
+                      style: const TextStyle(fontSize: 16, color: _ink),
+                      decoration: _decoration('Логин'),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: passwordController,
+                      focusNode: _passwordFocus,
+                      enabled: !loading,
+                      obscureText: _obscure,
+                      autocorrect: false,
+                      enableSuggestions: false,
+                      textInputAction: TextInputAction.done,
+                      autofillHints: const [AutofillHints.password],
+                      onSubmitted: (_) => loading ? null : _login(),
+                      style: const TextStyle(fontSize: 16, color: _ink),
+                      decoration: _decoration(
+                        'Пароль',
+                        suffix: IconButton(
+                          onPressed: () => setState(() => _obscure = !_obscure),
+                          icon: Icon(
+                            _obscure
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                            color: _muted,
+                            size: 21,
+                          ),
+                        ),
+                      ),
+                    ),
+                    AnimatedSize(
+                      duration: const Duration(milliseconds: 180),
+                      child: _error == null
+                          ? const SizedBox(width: double.infinity)
+                          : Padding(
+                        padding: const EdgeInsets.only(top: 14, left: 2),
+                        child: Text(
+                          _error!,
+                          style: const TextStyle(
+                            color: Color(0xFFD64545),
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 28),
+                    SizedBox(
+                      height: 54,
+                      child: ElevatedButton(
+                        onPressed: loading ? null : _login,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _accent,
+                          disabledBackgroundColor: _accent.withAlpha(130),
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: loading
+                            ? const SizedBox(
+                          height: 22,
+                          width: 22,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2.5),
+                        )
+                            : const Text(
+                          'Войти',
+                          style: TextStyle(
+                              fontSize: 17, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),
@@ -160,36 +202,23 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  Widget _buildField({
-    required TextEditingController controller,
-    required String label,
-    required IconData icon,
-    bool isPassword = false,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 6),
-          child: Text(label,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-        ),
-        TextField(
-          controller: controller,
-          obscureText: isPassword,
-          onSubmitted: (_) => loading ? null : _login(),
-          decoration: InputDecoration(
-            prefixIcon: Icon(icon, size: 20, color: const Color(0xFF0F172A)),
-            filled: true,
-            fillColor: Colors.grey[100],
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-            contentPadding: const EdgeInsets.symmetric(vertical: 16),
-          ),
-        ),
-      ],
+  InputDecoration _decoration(String hint, {Widget? suffix}) {
+    OutlineInputBorder border(Color c, [double w = 1]) => OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide(color: c, width: w),
+    );
+
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: const TextStyle(color: _muted),
+      suffixIcon: suffix,
+      filled: true,
+      fillColor: Colors.white,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+      border: border(_line),
+      enabledBorder: border(_line),
+      disabledBorder: border(_line),
+      focusedBorder: border(_ink, 1.5),
     );
   }
 }

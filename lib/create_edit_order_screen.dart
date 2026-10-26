@@ -13,6 +13,12 @@ class AdminStatisticsScreen extends StatefulWidget {
 }
 
 class _AdminStatisticsScreenState extends State<AdminStatisticsScreen> {
+  static const _bg = Color(0xFFF5F5F3);
+  static const _ink = Color(0xFF16181D);
+  static const _muted = Color(0xFF7B808A);
+  static const _line = Color(0xFFE2E3E6);
+  static const _accent = Color(0xFFF26B1D);
+
   bool loading = true;
   String? error;
 
@@ -75,9 +81,22 @@ class _AdminStatisticsScreenState extends State<AdminStatisticsScreen> {
 
   num _n(dynamic v) => v is num ? v : (num.tryParse('${v ?? ''}') ?? 0);
 
+  // 1250000 -> "1 250 000"
+  String _fmt(num v) {
+    final s = v.toInt().toString();
+    return s.replaceAllMapped(
+        RegExp(r'(\d)(?=(\d{3})+$)'), (m) => '${m[1]}\u00A0');
+  }
+
   Map<String, dynamic> _bucket(String name) {
     return restaurantStats.putIfAbsent(
-        name, () => {'count': 0, 'prodSum': 0.0, 'delivSum': 0.0, 'statuses': <String, int>{}});
+        name,
+            () => {
+          'count': 0,
+          'prodSum': 0.0,
+          'delivSum': 0.0,
+          'statuses': <String, int>{}
+        });
   }
 
   Future<void> _calculateStats() async {
@@ -161,185 +180,451 @@ class _AdminStatisticsScreenState extends State<AdminStatisticsScreen> {
     if (mounted) setState(() => loading = false);
   }
 
+  // ---------- ЭКРАН ----------
   @override
   Widget build(BuildContext context) {
-    final sortedRestaurants = restaurantStats.entries.toList()
+    return Scaffold(
+      backgroundColor: _bg,
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760),
+            child: Column(
+              children: [
+                _buildHeader(),
+                Expanded(child: _buildBody()),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _squareButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    required String tooltip,
+  }) {
+    return Material(
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: _line),
+      ),
+      child: IconButton(
+        tooltip: tooltip,
+        icon: Icon(icon, color: _ink, size: 21),
+        onPressed: onTap,
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    final subtitle = loading || error != null
+        ? 'Финансы и заказы'
+        : 'Всего заказов: $totalOrders';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _squareButton(
+                icon: Icons.arrow_back_rounded,
+                tooltip: 'Назад',
+                onTap: () => Navigator.maybePop(context),
+              ),
+              const Spacer(),
+              _squareButton(
+                icon: Icons.refresh_rounded,
+                tooltip: 'Обновить',
+                onTap: _calculateStats,
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'Аналитика',
+            style: TextStyle(
+              fontSize: 32,
+              fontWeight: FontWeight.w800,
+              color: _ink,
+              height: 1.1,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(subtitle, style: const TextStyle(fontSize: 15, color: _muted)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    if (loading) {
+      return const Center(
+          child: CircularProgressIndicator(color: _ink, strokeWidth: 2.5));
+    }
+    if (error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cloud_off_rounded, size: 40, color: _muted),
+              const SizedBox(height: 12),
+              Text(error!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: _muted, fontSize: 15)),
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: _calculateStats,
+                child: const Text('Повторить',
+                    style: TextStyle(color: _ink, fontWeight: FontWeight.w700)),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final sorted = restaurantStats.entries.toList()
       ..sort((a, b) => ((b.value['prodSum'] + b.value['delivSum']) as double)
           .compareTo((a.value['prodSum'] + a.value['delivSum']) as double));
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF1F5F9),
-      appBar: AppBar(
-        title: const Text('ФИНАНСОВАЯ АНАЛИТИКА',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white)),
-        backgroundColor: const Color(0xFF0F172A),
-        iconTheme: const IconThemeData(color: Colors.white),
-        elevation: 0,
-        actions: [
-          IconButton(
-              onPressed: _calculateStats,
-              icon: const Icon(Icons.refresh, color: Colors.white))
-        ],
-      ),
-      body: loading
-          ? const Center(child: CircularProgressIndicator())
-          : error != null
-          ? Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(error!, textAlign: TextAlign.center),
-            TextButton(onPressed: _calculateStats, child: const Text('Повторить')),
-          ],
-        ),
-      )
-          : RefreshIndicator(
-        onRefresh: _calculateStats,
-        child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(16),
-          children: [
-            _buildMainMoneyBlock(),
-            const SizedBox(height: 20),
-            const Text('Доход от доставки по типам',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-            _buildTypeGrid(),
-            const SizedBox(height: 24),
-            const Text('Детализация',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-            if (sortedRestaurants.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(24),
-                child: Center(child: Text('Данных пока нет')),
-              ),
-            ...sortedRestaurants.map((e) => _buildRestaurantCard(e.key, e.value)),
-          ],
-        ),
-      ),
-    );
-  }
+    final double maxTotal = sorted.isEmpty
+        ? 0
+        : (sorted.first.value['prodSum'] + sorted.first.value['delivSum'])
+    as double;
 
-  Widget _buildMainMoneyBlock() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 20)],
-      ),
-      child: Column(
+    return RefreshIndicator(
+      color: _ink,
+      onRefresh: _calculateStats,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
         children: [
+          _buildHeroCard(),
+          const SizedBox(height: 10),
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _moneyCircle('Оборот', totalSum, Colors.blue),
-              _moneyCircle('Заказы', totalOrders.toDouble(), Colors.purple, isMoney: false),
-              _moneyCircle('Отменено', cancelledOrders.toDouble(), Colors.red, isMoney: false),
+              Expanded(
+                  child: _miniStat(
+                      'Заказы', '$totalOrders', Icons.receipt_long_rounded)),
+              const SizedBox(width: 10),
+              Expanded(
+                  child: _miniStat(
+                      'Отменено', '$cancelledOrders', Icons.block_rounded)),
             ],
           ),
-          const Divider(height: 40),
-          _moneyRow('За товары', totalProductsSum, Colors.orange),
-          const SizedBox(height: 12),
-          _moneyRow('Доход от доставки', totalDeliverySum, Colors.teal),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTypeGrid() {
-    return GridView.count(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: 2,
-      mainAxisSpacing: 10,
-      crossAxisSpacing: 10,
-      childAspectRatio: 2,
-      children: typeStats.entries
-          .map((e) => Container(
-        padding: const EdgeInsets.all(12),
-        decoration:
-        BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(e.key,
-                style: const TextStyle(
-                    fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold)),
-            Text('${(e.value['sum'] as double).toInt()} Руб',
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            Text('${e.value['count']} зак.',
-                style: const TextStyle(fontSize: 10, color: Colors.blueGrey)),
-          ],
-        ),
-      ))
-          .toList(),
-    );
-  }
-
-  Widget _buildRestaurantCard(String name, Map<String, dynamic> data) {
-    final double total = data['prodSum'] + data['delivSum'];
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-      child: ExpansionTile(
-        title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text('${total.toInt()} Руб | ${data['count']} заказов'),
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              children: [
-                if (name != kIndividual) ...[
-                  _moneyRow('Товары', data['prodSum'], Colors.orange),
-                  const SizedBox(height: 8),
-                ],
-                _moneyRow('Доставка', data['delivSum'], Colors.teal),
-                const Divider(),
-                Wrap(
-                  spacing: 6,
-                  children: (data['statuses'] as Map<String, int>)
-                      .entries
-                      .map((s) => Chip(
-                    label: Text('${s.key}: ${s.value}',
-                        style: const TextStyle(fontSize: 10)),
-                    backgroundColor: Colors.blueGrey.withOpacity(0.05),
-                  ))
-                      .toList(),
-                )
-              ],
+          const SizedBox(height: 28),
+          _sectionTitle('Доход от доставки'),
+          const SizedBox(height: 10),
+          _buildTypeRow(),
+          const SizedBox(height: 28),
+          _sectionTitle('По заведениям'),
+          const SizedBox(height: 10),
+          if (sorted.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(32),
+              child: Center(
+                child: Text('Данных пока нет',
+                    style: TextStyle(color: _muted, fontSize: 15)),
+              ),
             ),
-          )
+          ...sorted.map((e) => _buildRestaurantCard(e.key, e.value, maxTotal)),
         ],
       ),
     );
   }
 
-  Widget _moneyCircle(String label, double val, Color color, {bool isMoney = true}) {
-    return Column(
+  Widget _sectionTitle(String text) {
+    return Text(
+      text,
+      style: const TextStyle(
+          fontSize: 13, fontWeight: FontWeight.w600, color: _muted),
+    );
+  }
+
+  BoxDecoration get _cardDecoration => BoxDecoration(
+    color: Colors.white,
+    borderRadius: BorderRadius.circular(18),
+    border: Border.all(color: _line),
+  );
+
+  // ---------- ГЛАВНАЯ КАРТОЧКА ----------
+  Widget _buildHeroCard() {
+    final prod = totalProductsSum;
+    final deliv = totalDeliverySum;
+    final sum = prod + deliv;
+    final prodFlex = sum == 0 ? 1 : (prod / sum * 1000).round().clamp(1, 999);
+    final delivFlex = sum == 0 ? 1 : (deliv / sum * 1000).round().clamp(1, 999);
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: _cardDecoration.copyWith(
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Оборот',
+              style: TextStyle(fontSize: 14, color: _muted)),
+          const SizedBox(height: 6),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              '${_fmt(totalSum)} Руб',
+              style: const TextStyle(
+                fontSize: 38,
+                fontWeight: FontWeight.w800,
+                color: _ink,
+                height: 1.1,
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: SizedBox(
+              height: 8,
+              child: sum == 0
+                  ? Container(color: _bg)
+                  : Row(
+                children: [
+                  Expanded(
+                      flex: prodFlex, child: Container(color: _ink)),
+                  const SizedBox(width: 2),
+                  Expanded(
+                      flex: delivFlex, child: Container(color: _accent)),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          _legendRow('За товары', prod, _ink),
+          const SizedBox(height: 10),
+          _legendRow('Доход от доставки', deliv, _accent),
+        ],
+      ),
+    );
+  }
+
+  Widget _legendRow(String label, double amount, Color dot) {
+    return Row(
       children: [
-        Text(isMoney ? '${val.toInt()} Руб' : val.toInt().toString(),
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: color)),
-        Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        Container(
+          width: 9,
+          height: 9,
+          decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(label,
+              style: const TextStyle(fontSize: 14, color: _muted)),
+        ),
+        Text(
+          '${_fmt(amount)} Руб',
+          style: const TextStyle(
+              fontSize: 15, fontWeight: FontWeight.w700, color: _ink),
+        ),
       ],
     );
   }
 
-  Widget _moneyRow(String label, double amount, Color color) {
+  Widget _miniStat(String label, String value, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: _cardDecoration,
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: _bg,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: _ink, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(value,
+                    style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        color: _ink)),
+                Text(label,
+                    style: const TextStyle(fontSize: 13, color: _muted)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------- ТИПЫ ----------
+  Widget _buildTypeRow() {
+    final entries = typeStats.entries.toList();
+    return Row(
+      children: [
+        for (int i = 0; i < entries.length; i++) ...[
+          if (i > 0) const SizedBox(width: 10),
+          Expanded(child: _typeTile(entries[i].key, entries[i].value)),
+        ],
+      ],
+    );
+  }
+
+  Widget _typeTile(String title, Map<String, dynamic> v) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: _cardDecoration,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: const TextStyle(fontSize: 13, color: _muted)),
+          const SizedBox(height: 8),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              '${_fmt(v['sum'] as double)} Руб',
+              style: const TextStyle(
+                  fontSize: 20, fontWeight: FontWeight.w800, color: _ink),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text('${v['count']} зак.',
+              style: const TextStyle(fontSize: 12, color: _muted)),
+        ],
+      ),
+    );
+  }
+
+  // ---------- ЗАВЕДЕНИЯ ----------
+  Widget _buildRestaurantCard(
+      String name, Map<String, dynamic> data, double maxTotal) {
+    final double total = data['prodSum'] + data['delivSum'];
+    final double share = maxTotal == 0 ? 0 : (total / maxTotal).clamp(0.0, 1.0);
+    final statuses = data['statuses'] as Map<String, int>;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: _cardDecoration,
+      clipBehavior: Clip.antiAlias,
+      child: Theme(
+        data: Theme.of(context).copyWith(
+          dividerColor: Colors.transparent,
+          splashColor: _bg,
+          highlightColor: Colors.transparent,
+        ),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
+          childrenPadding: EdgeInsets.zero,
+          iconColor: _muted,
+          collapsedIconColor: _muted,
+          shape: const Border(),
+          collapsedShape: const Border(),
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w700, color: _ink),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${_fmt(total)} Руб',
+                style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.w800, color: _ink),
+              ),
+            ],
+          ),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 8, right: 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('${data['count']} заказов',
+                    style: const TextStyle(fontSize: 13, color: _muted)),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: share,
+                    minHeight: 4,
+                    backgroundColor: _bg,
+                    valueColor: const AlwaysStoppedAnimation(_ink),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          children: [
+            const Divider(height: 1, color: _line),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (name != kIndividual) ...[
+                    _kv('Товары', '${_fmt(data['prodSum'])} Руб'),
+                    const SizedBox(height: 8),
+                  ],
+                  _kv('Доставка', '${_fmt(data['delivSum'])} Руб'),
+                  if (statuses.isNotEmpty) ...[
+                    const SizedBox(height: 14),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: statuses.entries
+                          .map((s) => Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: _bg,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          '${s.key}: ${s.value}',
+                          style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: _ink),
+                        ),
+                      ))
+                          .toList(),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _kv(String label, String value) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Row(
-          children: [
-            CircleAvatar(radius: 4, backgroundColor: color),
-            const SizedBox(width: 8),
-            Text(label,
-                style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w500)),
-          ],
-        ),
-        Text('${amount.toInt()} Руб', style: const TextStyle(fontWeight: FontWeight.bold)),
+        Text(label, style: const TextStyle(fontSize: 14, color: _muted)),
+        Text(value,
+            style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w700, color: _ink)),
       ],
     );
   }

@@ -12,8 +12,17 @@ class AdminLogsScreen extends StatefulWidget {
 }
 
 class _AdminLogsScreenState extends State<AdminLogsScreen> {
+  static const _bg = Color(0xFFF5F5F3);
+  static const _ink = Color(0xFF16181D);
+  static const _muted = Color(0xFF7B808A);
+  static const _line = Color(0xFFE2E3E6);
+  static const _accent = Color(0xFFF26B1D);
+  static const _green = Color(0xFF3FA66B);
+  static const _red = Color(0xFFD64545);
+
   String filterAction = 'Все';
   String searchQuery = '';
+  final TextEditingController searchController = TextEditingController();
 
   List<Map<String, dynamic>> _logs = [];
   bool _loading = true;
@@ -23,6 +32,12 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    searchController.dispose();
+    super.dispose();
   }
 
   // ---------- СЕРВЕР ----------
@@ -63,28 +78,62 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> {
   // Тип действия: create | delete | edit | info
   String _kind(String action) {
     final act = action.toLowerCase();
-    if (act.contains('удал') || act.contains('отклон') || act.contains('убрал') || act.contains('отключ')) {
+    if (act.contains('удал') ||
+        act.contains('отклон') ||
+        act.contains('убрал') ||
+        act.contains('отключ')) {
       return 'delete';
     }
-    if (act.contains('добав') || act.contains('создал') || act.contains('одобрил') || act.contains('включ')) {
+    if (act.contains('добав') ||
+        act.contains('создал') ||
+        act.contains('одобрил') ||
+        act.contains('включ')) {
       return 'create';
     }
-    if (act.contains('измен') || act.contains('обновил') || act.contains('редакт')) {
+    if (act.contains('измен') ||
+        act.contains('обновил') ||
+        act.contains('редакт')) {
       return 'edit';
     }
     return 'info';
   }
 
-  Map<String, dynamic> _getLogStyle(String action) {
-    switch (_kind(action)) {
+  Color _kindColor(String kind) {
+    switch (kind) {
       case 'delete':
-        return {'color': Colors.redAccent, 'icon': Icons.delete_sweep_rounded};
+        return _red;
       case 'create':
-        return {'color': Colors.green, 'icon': Icons.add_circle_outline_rounded};
+        return _green;
       case 'edit':
-        return {'color': Colors.orangeAccent, 'icon': Icons.edit_document};
+        return _accent;
       default:
-        return {'color': Colors.blueAccent, 'icon': Icons.history_rounded};
+        return _muted;
+    }
+  }
+
+  String _kindLabel(String kind) {
+    switch (kind) {
+      case 'delete':
+        return 'Удаление';
+      case 'create':
+        return 'Создание';
+      case 'edit':
+        return 'Изменение';
+      default:
+        return 'Событие';
+    }
+  }
+
+  IconData _kindIcon(String kind) {
+    switch (kind) {
+      case 'delete':
+        return Icons.delete_outline_rounded;
+      case 'create':
+        return Icons.add_rounded;
+      case 'edit':
+        return Icons.edit_outlined;
+      default:
+        return Icons.history_rounded;
     }
   }
 
@@ -102,14 +151,24 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> {
   String _adminOf(Map<String, dynamic> log) =>
       (log['admin_name'] ?? log['adminName'] ?? 'Система').toString();
 
+  static const _filterToKind = {
+    'Создание': 'create',
+    'Изменение': 'edit',
+    'Удаление': 'delete',
+  };
+
+  int _count(String filter) {
+    if (filter == 'Все') return _logs.length;
+    final want = _filterToKind[filter];
+    return _logs.where((l) => _kind((l['action'] ?? '').toString()) == want).length;
+  }
+
   List<Map<String, dynamic>> _applyFilter() {
     final q = searchQuery.trim().toLowerCase();
     return _logs.where((log) {
       final action = (log['action'] ?? '').toString();
       if (filterAction != 'Все') {
-        final kind = _kind(action);
-        final want = {'Создание': 'create', 'Изменение': 'edit', 'Удаление': 'delete'}[filterAction];
-        if (kind != want) return false;
+        if (_kind(action) != _filterToKind[filterAction]) return false;
       }
       if (q.isEmpty) return true;
       return action.toLowerCase().contains(q) ||
@@ -118,45 +177,235 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> {
     }).toList();
   }
 
+  static const _months = [
+    'января',
+    'февраля',
+    'марта',
+    'апреля',
+    'мая',
+    'июня',
+    'июля',
+    'августа',
+    'сентября',
+    'октября',
+    'ноября',
+    'декабря',
+  ];
+
+  String _dayLabel(DateTime? d) {
+    if (d == null) return 'Без даты';
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final day = DateTime(d.year, d.month, d.day);
+    final diff = today.difference(day).inDays;
+    if (diff == 0) return 'Сегодня';
+    if (diff == 1) return 'Вчера';
+    final base = '${d.day} ${_months[d.month - 1]}';
+    return d.year == now.year ? base : '$base ${d.year}';
+  }
+
+  // Плоский список: строки-заголовки дней и записи
+  List<Object> _buildItems(List<Map<String, dynamic>> logs) {
+    final items = <Object>[];
+    String? lastLabel;
+    for (final log in logs) {
+      final label = _dayLabel(_dateOf(log));
+      if (label != lastLabel) {
+        items.add(label);
+        lastLabel = label;
+      }
+      items.add(log);
+    }
+    return items;
+  }
+
   // ---------- ЭКРАН ----------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF1F5F9),
-      appBar: AppBar(
-        elevation: 0,
-        backgroundColor: const Color(0xFF0F172A),
-        iconTheme: const IconThemeData(color: Colors.white),
-        title: const Text('ЖУРНАЛ СОБЫТИЙ',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: 1.2)),
-        actions: [
-          IconButton(
-              icon: const Icon(Icons.refresh_rounded, color: Colors.white),
-              onPressed: () => _load()),
-        ],
+      backgroundColor: _bg,
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760),
+            child: Column(
+              children: [
+                _buildHeader(),
+                Expanded(child: _buildBody()),
+              ],
+            ),
+          ),
+        ),
       ),
-      body: Column(
+    );
+  }
+
+  Widget _squareButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    required String tooltip,
+  }) {
+    return Material(
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: _line),
+      ),
+      child: IconButton(
+        tooltip: tooltip,
+        icon: Icon(icon, color: _ink, size: 21),
+        onPressed: onTap,
+      ),
+    );
+  }
+
+  OutlineInputBorder _border(Color c, [double w = 1]) => OutlineInputBorder(
+    borderRadius: BorderRadius.circular(14),
+    borderSide: BorderSide(color: c, width: w),
+  );
+
+  Widget _buildHeader() {
+    final subtitle = _loading ? 'История действий админов' : 'Событий: ${_logs.length}';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildFilterBar(),
-          Expanded(child: _buildBody()),
+          Row(
+            children: [
+              _squareButton(
+                icon: Icons.arrow_back_rounded,
+                tooltip: 'Назад',
+                onTap: () => Navigator.maybePop(context),
+              ),
+              const Spacer(),
+              _squareButton(
+                icon: Icons.refresh_rounded,
+                tooltip: 'Обновить',
+                onTap: () => _load(),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'Журнал',
+            style: TextStyle(
+              fontSize: 32,
+              fontWeight: FontWeight.w800,
+              color: _ink,
+              height: 1.1,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(subtitle, style: const TextStyle(fontSize: 15, color: _muted)),
+          const SizedBox(height: 16),
+          TextField(
+            controller: searchController,
+            style: const TextStyle(fontSize: 15, color: _ink),
+            onChanged: (v) => setState(() => searchQuery = v),
+            decoration: InputDecoration(
+              hintText: 'Действие, объект или админ',
+              hintStyle: const TextStyle(color: _muted),
+              prefixIcon: const Icon(Icons.search_rounded, color: _muted),
+              suffixIcon: searchQuery.isEmpty
+                  ? null
+                  : IconButton(
+                icon: const Icon(Icons.close_rounded, color: _muted, size: 20),
+                onPressed: () {
+                  searchController.clear();
+                  setState(() => searchQuery = '');
+                },
+              ),
+              filled: true,
+              fillColor: Colors.white,
+              contentPadding: const EdgeInsets.symmetric(vertical: 16),
+              border: _border(_line),
+              enabledBorder: _border(_line),
+              focusedBorder: _border(_ink, 1.5),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildChips(),
         ],
       ),
     );
   }
 
+  Widget _buildChips() {
+    const filters = ['Все', 'Создание', 'Изменение', 'Удаление'];
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: filters.map((f) {
+          final isSel = filterAction == f;
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: GestureDetector(
+              onTap: () => setState(() => filterAction = f),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                decoration: BoxDecoration(
+                  color: isSel ? Colors.white : Colors.transparent,
+                  borderRadius: BorderRadius.circular(22),
+                  border: Border.all(
+                    color: isSel ? _ink : _line,
+                    width: isSel ? 1.5 : 1,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      f,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: isSel ? FontWeight.w700 : FontWeight.w500,
+                        color: isSel ? _ink : _muted,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '${_count(f)}',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: isSel ? _muted : _line,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
   Widget _buildBody() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator(color: _ink, strokeWidth: 2.5));
+    }
     if (_error != null && _logs.isEmpty) {
       return Center(
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(32),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.cloud_off_rounded, size: 50, color: Colors.redAccent),
+              const Icon(Icons.cloud_off_rounded, size: 40, color: _muted),
               const SizedBox(height: 12),
-              Text(_error!, textAlign: TextAlign.center),
-              TextButton(onPressed: () => _load(), child: const Text('Повторить')),
+              Text(_error!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: _muted, fontSize: 15)),
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: () => _load(),
+                child: const Text('Повторить',
+                    style: TextStyle(color: _ink, fontWeight: FontWeight.w700)),
+              ),
             ],
           ),
         ),
@@ -164,73 +413,68 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> {
     }
 
     final logs = _applyFilter();
+    final items = _buildItems(logs);
+
     return RefreshIndicator(
+      color: _ink,
       onRefresh: () => _load(spinner: false),
       child: logs.isEmpty
           ? ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         children: const [
-          SizedBox(height: 120),
-          Icon(Icons.search_off_rounded, size: 60, color: Colors.grey),
-          SizedBox(height: 16),
-          Center(child: Text('Событий не найдено', style: TextStyle(color: Colors.grey))),
+          SizedBox(height: 100),
+          Icon(Icons.history_toggle_off_rounded, size: 40, color: _muted),
+          SizedBox(height: 12),
+          Center(
+            child: Text('Событий не найдено',
+                style: TextStyle(color: _muted, fontSize: 15)),
+          ),
         ],
       )
           : ListView.builder(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(16),
-        itemCount: logs.length,
-        itemBuilder: (context, index) => _buildLogCard(logs[index]),
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
+        itemCount: items.length,
+        itemBuilder: (context, index) {
+          final item = items[index];
+          if (item is String) return _dayHeader(item, first: index == 0);
+          return _buildLogCard(item as Map<String, dynamic>);
+        },
       ),
     );
   }
 
-  Widget _buildFilterBar() {
+  Widget _dayHeader(String label, {required bool first}) {
+    return Padding(
+      padding: EdgeInsets.only(top: first ? 4 : 18, bottom: 10),
+      child: Text(
+        label,
+        style: const TextStyle(
+            fontSize: 13, fontWeight: FontWeight.w600, color: _muted),
+      ),
+    );
+  }
+
+  Widget _kindPill(String kind) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-      color: const Color(0xFF0F172A),
-      child: Column(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: _bg,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          TextField(
-            style: const TextStyle(color: Colors.white),
-            onChanged: (v) => setState(() => searchQuery = v),
-            decoration: InputDecoration(
-              hintText: 'Поиск: действие, объект, админ...',
-              hintStyle: const TextStyle(color: Colors.white54),
-              prefixIcon: const Icon(Icons.search, color: Colors.white54),
-              filled: true,
-              fillColor: Colors.white.withOpacity(0.1),
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-            ),
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(color: _kindColor(kind), shape: BoxShape.circle),
           ),
-          const SizedBox(height: 10),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: ['Все', 'Создание', 'Изменение', 'Удаление'].map((filter) {
-                final isSelected = filterAction == filter;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8.0),
-                  child: ChoiceChip(
-                    label: Text(filter),
-                    selected: isSelected,
-                    onSelected: (val) => setState(() => filterAction = filter),
-                    selectedColor: Colors.blueAccent,
-                    backgroundColor: Colors.transparent,
-                    labelStyle: TextStyle(
-                      color: isSelected ? Colors.white : Colors.blueAccent,
-                      fontSize: 13,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                    ),
-                    side: const BorderSide(color: Colors.blueAccent, width: 1),
-                    showCheckmark: false,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                  ),
-                );
-              }).toList(),
-            ),
+          const SizedBox(width: 6),
+          Text(
+            _kindLabel(kind),
+            style: const TextStyle(
+                fontSize: 12, fontWeight: FontWeight.w600, color: _ink),
           ),
         ],
       ),
@@ -239,110 +483,173 @@ class _AdminLogsScreenState extends State<AdminLogsScreen> {
 
   Widget _buildLogCard(Map<String, dynamic> log) {
     final action = (log['action'] ?? 'Действие').toString();
+    final kind = _kind(action);
     final date = _dateOf(log);
-    final style = _getLogStyle(action);
-    final Color color = style['color'] as Color;
     final hasDetails = log['oldValue'] != null || log['newValue'] != null;
     final target = (log['target'] ?? '').toString().trim();
+    final time = date != null ? DateFormat('HH:mm').format(date) : '';
+    final meta = [_adminOf(log), if (time.isNotEmpty) time].join(' · ');
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4))],
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _line),
       ),
-      child: ExpansionTile(
-        shape: const Border(),
-        collapsedShape: const Border(),
-        leading: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle),
-          child: Icon(style['icon'] as IconData, color: color, size: 20),
+      clipBehavior: Clip.antiAlias,
+      child: Theme(
+        data: Theme.of(context).copyWith(
+          dividerColor: Colors.transparent,
+          splashColor: _bg,
+          highlightColor: Colors.transparent,
         ),
-        title: Text(
-          action,
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF1E293B)),
-        ),
-        subtitle: Text(
-          '${_adminOf(log)}${date != null ? ' • ${DateFormat('dd.MM HH:mm').format(date)}' : ''}'
-              '${target.isNotEmpty ? '\n$target' : ''}',
-          style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-        ),
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.fromLTRB(14, 8, 12, 8),
+          childrenPadding: EdgeInsets.zero,
+          iconColor: _muted,
+          collapsedIconColor: _muted,
+          shape: const Border(),
+          collapsedShape: const Border(),
+          leading: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: _bg,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(_kindIcon(kind), color: _ink, size: 22),
+          ),
+          title: Text(
+            action,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+                fontSize: 15, fontWeight: FontWeight.w700, color: _ink),
+          ),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 4),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Divider(),
+                if (target.isNotEmpty)
+                  Text(
+                    target,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 13, color: _ink),
+                  ),
+                const SizedBox(height: 2),
+                Text(meta, style: const TextStyle(fontSize: 13, color: _muted)),
                 const SizedBox(height: 8),
-                _logDetailRow('Админ:', _adminOf(log)),
-                _logDetailRow('Объект:', target.isEmpty ? '—' : target),
-                if (date != null)
-                  _logDetailRow('Дата:', DateFormat('dd.MM.yyyy, HH:mm').format(date)),
-                if (hasDetails) ...[
-                  const SizedBox(height: 16),
-                  const Text('ИЗМЕНЕНИЯ:',
-                      style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blueGrey,
-                          letterSpacing: 1)),
-                  const SizedBox(height: 10),
-                  _buildComparisonBox(log['oldValue']?.toString() ?? 'нет данных',
-                      log['newValue']?.toString() ?? 'нет данных'),
-                ],
+                Align(alignment: Alignment.centerLeft, child: _kindPill(kind)),
               ],
             ),
-          )
-        ],
+          ),
+          children: [
+            const Divider(height: 1, color: _line),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _detailRow('Админ', _adminOf(log)),
+                  _detailRow('Объект', target.isEmpty ? '—' : target),
+                  if (date != null)
+                    _detailRow('Дата', DateFormat('dd.MM.yyyy, HH:mm').format(date)),
+                  if (hasDetails) ...[
+                    const SizedBox(height: 14),
+                    const Text(
+                      'Что изменилось',
+                      style: TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w600, color: _muted),
+                    ),
+                    const SizedBox(height: 8),
+                    _buildComparison(
+                      log['oldValue']?.toString() ?? 'нет данных',
+                      log['newValue']?.toString() ?? 'нет данных',
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildComparisonBox(String oldV, String newV) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-          color: const Color(0xFFF8FAFC),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.black.withOpacity(0.05))),
-      child: Column(
-        children: [
-          Row(
+  Widget _buildComparison(String oldV, String newV) {
+    return Column(
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: _bg,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.history, size: 14, color: Colors.grey),
-              const SizedBox(width: 8),
-              Expanded(child: Text('Было: $oldV', style: const TextStyle(fontSize: 12, color: Colors.redAccent))),
+              const Text('Было',
+                  style: TextStyle(fontSize: 12, color: _muted)),
+              const SizedBox(height: 3),
+              Text(
+                oldV,
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: _muted,
+                  decoration: TextDecoration.lineThrough,
+                ),
+              ),
             ],
           ),
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 8.0),
-            child: Icon(Icons.arrow_downward_rounded, size: 14, color: Colors.grey),
+        ),
+        const SizedBox(height: 6),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: _ink, width: 1.2),
           ),
-          Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.check_circle_outline, size: 14, color: Colors.green),
-              const SizedBox(width: 8),
-              Expanded(
-                  child: Text('Стало: $newV',
-                      style: const TextStyle(fontSize: 12, color: Colors.green, fontWeight: FontWeight.bold))),
+              const Text('Стало',
+                  style: TextStyle(fontSize: 12, color: _muted)),
+              const SizedBox(height: 3),
+              Text(
+                newV,
+                style: const TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.w700, color: _ink),
+              ),
             ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
-  Widget _logDetailRow(String label, String value) {
+  Widget _detailRow(String label, String value) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-          const SizedBox(width: 8),
-          Expanded(child: Text(value, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
+          SizedBox(
+            width: 72,
+            child: Text(label, style: const TextStyle(fontSize: 13, color: _muted)),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                  fontSize: 14, fontWeight: FontWeight.w600, color: _ink),
+            ),
+          ),
         ],
       ),
     );

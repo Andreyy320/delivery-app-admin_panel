@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'api.dart';
 
@@ -14,6 +15,13 @@ class AdminRequestsScreen extends StatefulWidget {
 }
 
 class _AdminRequestsScreenState extends State<AdminRequestsScreen> {
+  static const _bg = Color(0xFFF5F5F3);
+  static const _ink = Color(0xFF16181D);
+  static const _muted = Color(0xFF7B808A);
+  static const _line = Color(0xFFE2E3E6);
+  static const _accent = Color(0xFFF26B1D);
+  static const _red = Color(0xFFD64545);
+
   List<Map<String, dynamic>> _requests = [];
   bool _loading = true;
   String? _error;
@@ -77,8 +85,11 @@ class _AdminRequestsScreenState extends State<AdminRequestsScreen> {
   void _snack(String text, {bool error = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      behavior: SnackBarBehavior.floating,
+      margin: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      backgroundColor: error ? _red : _ink,
       content: Text(text),
-      backgroundColor: error ? Colors.redAccent : const Color(0xFF0F172A),
     ));
   }
 
@@ -88,199 +99,372 @@ class _AdminRequestsScreenState extends State<AdminRequestsScreen> {
     return List.generate(10, (_) => chars[rnd.nextInt(chars.length)]).join();
   }
 
+  Future<void> _copy(String text) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    _snack('Скопировано');
+  }
+
   // ---------- ЭКРАН ----------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0F172A),
-        elevation: 0,
-        centerTitle: true,
-        iconTheme: const IconThemeData(color: Colors.white),
-        title: Column(
-          children: [
-            const Text(
-              'РАССМОТРЕНИЕ ЗАЯВОК',
-              style: TextStyle(
-                  fontWeight: FontWeight.w900,
-                  fontSize: 13,
-                  letterSpacing: 1.2,
-                  color: Colors.white),
+      backgroundColor: _bg,
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760),
+            child: Column(
+              children: [
+                _buildHeader(),
+                Expanded(child: _buildBody()),
+              ],
             ),
-            Text('Админ: ${widget.currentAdminName}',
-                style: const TextStyle(color: Colors.white60, fontSize: 9)),
-          ],
+          ),
         ),
-        actions: [
-          IconButton(
-              icon: const Icon(Icons.refresh_rounded, color: Colors.white),
-              onPressed: () => _load()),
+      ),
+    );
+  }
+
+  Widget _squareButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    required String tooltip,
+  }) {
+    return Material(
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: _line),
+      ),
+      child: IconButton(
+        tooltip: tooltip,
+        icon: Icon(icon, color: _ink, size: 21),
+        onPressed: onTap,
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    final subtitle = _loading
+        ? 'Новые партнёры'
+        : _requests.isEmpty
+        ? 'Новых заявок нет'
+        : 'Ждут решения: ${_requests.length}';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _squareButton(
+                icon: Icons.arrow_back_rounded,
+                tooltip: 'Назад',
+                onTap: () => Navigator.maybePop(context),
+              ),
+              const Spacer(),
+              _squareButton(
+                icon: Icons.refresh_rounded,
+                tooltip: 'Обновить',
+                onTap: () => _load(),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'Заявки',
+            style: TextStyle(
+              fontSize: 32,
+              fontWeight: FontWeight.w800,
+              color: _ink,
+              height: 1.1,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(subtitle, style: const TextStyle(fontSize: 15, color: _muted)),
         ],
       ),
-      body: _buildBody(),
     );
   }
 
   Widget _buildBody() {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator(color: Color(0xFF0F172A)));
+      return const Center(child: CircularProgressIndicator(color: _ink, strokeWidth: 2.5));
     }
     if (_error != null && _requests.isEmpty) return _buildErrorState(_error!);
     return RefreshIndicator(
+      color: _ink,
       onRefresh: () => _load(spinner: false),
       child: _requests.isEmpty
           ? ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         children: [
-          SizedBox(height: MediaQuery.of(context).size.height * 0.25),
+          SizedBox(height: MediaQuery.of(context).size.height * 0.15),
           _buildEmptyState(),
         ],
       )
           : ListView.builder(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
         itemCount: _requests.length,
-        itemBuilder: (context, index) => _buildRequestCard(context, _requests[index]),
+        itemBuilder: (context, index) =>
+            _buildRequestCard(context, _requests[index]),
       ),
+    );
+  }
+
+  Widget _logoBox(String logo, double size, double radius, {double iconSize = 24}) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: _bg,
+        borderRadius: BorderRadius.circular(radius),
+        image: logo.isNotEmpty
+            ? DecorationImage(image: NetworkImage(logo), fit: BoxFit.cover)
+            : null,
+      ),
+      child: logo.isEmpty
+          ? Icon(Icons.storefront_rounded, color: _muted, size: iconSize)
+          : null,
     );
   }
 
   Widget _buildRequestCard(BuildContext context, Map<String, dynamic> data) {
     final logo = (data['logo_url'] ?? '').toString();
+    final phone = (data['phone'] ?? 'Телефон не указан').toString();
+    final category = (data['category'] ?? '').toString().trim();
+    final sub = [phone, if (category.isNotEmpty) category].join(' · ');
+
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Material(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.03),
-              blurRadius: 10,
-              offset: const Offset(0, 4)),
-        ],
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: Container(
-          width: 55,
-          height: 55,
-          decoration: BoxDecoration(
-            color: const Color(0xFFF1F5F9),
-            borderRadius: BorderRadius.circular(15),
-            image: logo.isNotEmpty
-                ? DecorationImage(image: NetworkImage(logo), fit: BoxFit.cover)
-                : null,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+          side: const BorderSide(color: _line),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => _showDetails(context, data),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              children: [
+                _logoBox(logo, 52, 14),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        (data['name'] ?? 'Без названия').toString(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w700, color: _ink),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        sub,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13, color: _muted),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right_rounded, color: _muted),
+              ],
+            ),
           ),
-          child: logo.isEmpty ? const Icon(Icons.storefront, color: Color(0xFF64748B)) : null,
         ),
-        title: Text(
-          (data['name'] ?? 'Без названия').toString(),
-          style: const TextStyle(
-              fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1E293B)),
-        ),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: Text(
-            (data['phone'] ?? 'Телефон не указан').toString(),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Color(0xFF64748B), fontSize: 13),
-          ),
-        ),
-        trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Color(0xFFCBD5E1)),
-        onTap: () => _showDetails(context, data),
       ),
     );
   }
 
+  String _coords(Map<String, dynamic> data) {
+    final lat = num.tryParse('${data['lat']}');
+    final lng = num.tryParse('${data['lng']}');
+    if (lat == null || lng == null) return '';
+    return '${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}';
+  }
+
   void _showDetails(BuildContext context, Map<String, dynamic> data) {
     final logo = (data['logo_url'] ?? '').toString();
+    final coords = _coords(data);
+
+    final rows = <Widget>[
+      _detailRow(Icons.alternate_email_rounded, 'Контакт',
+          (data['login'] ?? 'Не указан').toString()),
+      _detailRow(Icons.phone_outlined, 'Телефон',
+          (data['phone'] ?? 'Не указан').toString()),
+      if (coords.isNotEmpty)
+        _detailRow(Icons.location_on_outlined, 'Координаты', coords),
+      _detailRow(Icons.access_time_rounded, 'Время работы',
+          (data['time'] ?? 'Не указано').toString()),
+      _detailRow(Icons.category_outlined, 'Категория',
+          (data['category'] ?? 'Не указана').toString()),
+    ];
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (sheetCtx) => Container(
-        height: MediaQuery.of(context).size.height * 0.85,
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.9,
         ),
-        child: Column(
-          children: [
-            const SizedBox(height: 12),
-            Container(
+        decoration: const BoxDecoration(
+          color: _bg,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 10),
+              Container(
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                    color: Colors.grey[300], borderRadius: BorderRadius.circular(10))),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.all(24),
-                children: [
-                  Center(
-                    child: Container(
-                      width: 120,
-                      height: 120,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF1F5F9),
-                        borderRadius: BorderRadius.circular(30),
-                        boxShadow: [
-                          BoxShadow(
-                              color: Colors.black.withOpacity(0.1),
-                              blurRadius: 20,
-                              offset: const Offset(0, 10))
-                        ],
-                        image: logo.isNotEmpty
-                            ? DecorationImage(image: NetworkImage(logo), fit: BoxFit.cover)
-                            : null,
-                      ),
-                      child: logo.isEmpty ? const Icon(Icons.store, size: 50) : null,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  Text(
-                    (data['name'] ?? 'Заявка').toString(),
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                        fontSize: 24, fontWeight: FontWeight.w900, color: Color(0xFF0F172A)),
-                  ),
-                  const SizedBox(height: 32),
-                  _detailItem(Icons.alternate_email_rounded, 'Контакт (логин по умолчанию)',
-                      (data['login'] ?? 'Не указан').toString()),
-                  _detailItem(Icons.phone_android_rounded, 'Телефон',
-                      (data['phone'] ?? 'Не указан').toString()),
-                  if (data['lat'] != null && data['lng'] != null)
-                    _detailItem(Icons.location_on_rounded, 'Координаты',
-                        '${(data['lat'] as num).toStringAsFixed(5)}, ${(data['lng'] as num).toStringAsFixed(5)}'),
-                  _detailItem(Icons.access_time_filled_rounded, 'Время работы',
-                      (data['time'] ?? 'Не указано').toString()),
-                  _detailItem(Icons.category_rounded, 'Категория',
-                      (data['category'] ?? 'Не указана').toString()),
-                  const SizedBox(height: 40),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _actionButton('ОТКЛОНИТЬ', Colors.redAccent, () async {
-                          Navigator.pop(sheetCtx);
-                          await _reject(data);
-                        }),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: _actionButton('ОДОБРИТЬ', const Color(0xFF0F172A), () {
-                          Navigator.pop(sheetCtx);
-                          _showCredentialsDialog(data);
-                        }),
-                      ),
-                    ],
-                  ),
-                ],
+                    color: _line, borderRadius: BorderRadius.circular(10)),
               ),
-            ),
-          ],
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
+                  children: [
+                    Center(child: _logoBox(logo, 96, 26, iconSize: 40)),
+                    const SizedBox(height: 18),
+                    Text(
+                      (data['name'] ?? 'Заявка').toString(),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          fontSize: 24, fontWeight: FontWeight.w800, color: _ink),
+                    ),
+                    const SizedBox(height: 24),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: _line),
+                      ),
+                      child: Column(
+                        children: [
+                          for (int i = 0; i < rows.length; i++) ...[
+                            rows[i],
+                            if (i != rows.length - 1)
+                              const Divider(height: 1, color: _line),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: SizedBox(
+                        height: 54,
+                        child: OutlinedButton(
+                          onPressed: () async {
+                            Navigator.pop(sheetCtx);
+                            await _reject(data);
+                          },
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: _red,
+                            side: const BorderSide(color: _line),
+                            backgroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12)),
+                          ),
+                          child: const Text('Отклонить',
+                              style: TextStyle(
+                                  fontSize: 16, fontWeight: FontWeight.w600)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: SizedBox(
+                        height: 54,
+                        child: ElevatedButton(
+                          onPressed: () {
+                            Navigator.pop(sheetCtx);
+                            _showCredentialsDialog(data);
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _accent,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12)),
+                          ),
+                          child: const Text('Одобрить',
+                              style: TextStyle(
+                                  fontSize: 16, fontWeight: FontWeight.w600)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
+    );
+  }
+
+  Widget _detailRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        children: [
+          Icon(icon, color: _muted, size: 20),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: const TextStyle(fontSize: 12, color: _muted)),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: const TextStyle(
+                      fontSize: 15, fontWeight: FontWeight.w600, color: _ink),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------- ДИАЛОГИ ----------
+  InputDecoration _fieldDecoration(String label, {String? helper, Widget? suffix}) {
+    OutlineInputBorder border(Color c, [double w = 1]) => OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide(color: c, width: w),
+    );
+    return InputDecoration(
+      labelText: label,
+      helperText: helper,
+      labelStyle: const TextStyle(color: _muted),
+      floatingLabelStyle: const TextStyle(color: _ink),
+      suffixIcon: suffix,
+      filled: true,
+      fillColor: _bg,
+      border: border(_line),
+      enabledBorder: border(_line),
+      focusedBorder: border(_ink, 1.5),
     );
   }
 
@@ -288,13 +472,26 @@ class _AdminRequestsScreenState extends State<AdminRequestsScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (dctx) => AlertDialog(
-        title: const Text('Отклонить заявку?'),
-        content: const Text('Заявка будет удалена. Заведение сможет подать новую.'),
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        title: const Text('Отклонить заявку?',
+            style: TextStyle(fontWeight: FontWeight.w800, color: _ink)),
+        content: const Text(
+          'Заявка будет удалена. Заведение сможет подать новую.',
+          style: TextStyle(color: _muted),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(dctx, false), child: const Text('Нет')),
           TextButton(
-              onPressed: () => Navigator.pop(dctx, true),
-              child: const Text('Отклонить', style: TextStyle(color: Colors.red))),
+            onPressed: () => Navigator.pop(dctx, false),
+            child: const Text('Нет',
+                style: TextStyle(color: _ink, fontWeight: FontWeight.w600)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dctx, true),
+            child: const Text('Отклонить',
+                style: TextStyle(color: _red, fontWeight: FontWeight.w700)),
+          ),
         ],
       ),
     ) ??
@@ -304,140 +501,247 @@ class _AdminRequestsScreenState extends State<AdminRequestsScreen> {
     if (err != null) {
       _snack(err, error: true);
     } else {
-      _snack('Заявка отклонена', error: true);
+      _snack('Заявка отклонена');
       _load(spinner: false);
     }
   }
 
   void _showCredentialsDialog(Map<String, dynamic> data) {
-    final loginController = TextEditingController(text: (data['login'] ?? '').toString());
-    final passwordController = TextEditingController(text: _randomPassword());
+    final loginController = TextEditingController();
+    final passwordController = TextEditingController();
+    bool obscure = true;
+    bool saving = false;
+    String? formError;
 
     showDialog(
       context: context,
       barrierDismissible: false,
+      builder: (dctx) => StatefulBuilder(
+        builder: (dctx, setDialog) {
+          Future<void> submit() async {
+            final login = loginController.text.trim();
+            final pass = passwordController.text.trim();
+
+            if (login.isEmpty || pass.isEmpty) {
+              setDialog(() => formError = 'Заполните логин и пароль');
+              return;
+            }
+            if (pass.length < 6) {
+              setDialog(() => formError = 'Пароль слишком короткий (минимум 6 символов)');
+              return;
+            }
+
+            setDialog(() {
+              saving = true;
+              formError = null;
+            });
+
+            final err = await _post('/api/admin/requests/${data['id']}/approve',
+                {'login': login, 'password': pass});
+
+            if (err != null) {
+              if (dctx.mounted) {
+                setDialog(() {
+                  saving = false;
+                  formError = err; // ошибка показывается в самом окне
+                });
+              }
+              return;
+            }
+
+            if (dctx.mounted) Navigator.pop(dctx);
+            _showAccessIssued(login, pass);
+            _load(spinner: false);
+          }
+
+          return AlertDialog(
+            backgroundColor: Colors.white,
+            surfaceTintColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+            title: const Text('Выдача доступа',
+                style: TextStyle(fontWeight: FontWeight.w800, color: _ink)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: loginController,
+                    enabled: !saving,
+                    autofocus: true,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    textInputAction: TextInputAction.next,
+                    onChanged: (_) {
+                      if (formError != null) setDialog(() => formError = null);
+                    },
+                    decoration: _fieldDecoration('Логин'),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: passwordController,
+                    enabled: !saving,
+                    obscureText: obscure,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    textInputAction: TextInputAction.done,
+                    onChanged: (_) {
+                      if (formError != null) setDialog(() => formError = null);
+                    },
+                    onSubmitted: (_) => saving ? null : submit(),
+                    decoration: _fieldDecoration(
+                      'Пароль',
+                      suffix: IconButton(
+                        icon: Icon(
+                          obscure
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                          color: _muted,
+                          size: 20,
+                        ),
+                        onPressed: () => setDialog(() => obscure = !obscure),
+                      ),
+                    ),
+                  ),
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 180),
+                    child: formError == null
+                        ? const SizedBox(width: double.infinity)
+                        : Padding(
+                      padding: const EdgeInsets.only(top: 12, left: 2),
+                      child: Text(
+                        formError!,
+                        style: const TextStyle(
+                            fontSize: 13, color: _red, height: 1.3),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Padding(
+                    padding: EdgeInsets.only(left: 2),
+                    child: Text(
+                      'После сохранения пароль не показывается, передайте его заведению заранее.',
+                      style: TextStyle(fontSize: 12, color: _muted, height: 1.3),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: saving ? null : () => Navigator.pop(dctx),
+                child: const Text('Отмена',
+                    style: TextStyle(color: _muted, fontWeight: FontWeight.w600)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _accent,
+                  disabledBackgroundColor: _accent.withAlpha(130),
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: saving ? null : submit,
+                child: saving
+                    ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                      color: Colors.white, strokeWidth: 2),
+                )
+                    : const Text('Сохранить',
+                    style: TextStyle(fontWeight: FontWeight.w700)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+
+
+  void _showAccessIssued(String login, String pass) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
       builder: (dctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Выдача доступа', style: TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        title: const Text('Доступ выдан',
+            style: TextStyle(fontWeight: FontWeight.w800, color: _ink)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TextField(
-              controller: loginController,
-              decoration: const InputDecoration(
-                labelText: 'Логин (login)',
-                hintText: 'Например: buket_md',
-                border: OutlineInputBorder(),
-              ),
-            ),
+            const Text('Передайте данные заведению. Пароль больше не покажется.',
+                style: TextStyle(color: _muted)),
             const SizedBox(height: 16),
-            TextField(
-              controller: passwordController,
-              decoration: const InputDecoration(
-                labelText: 'Пароль (password)',
-                helperText: 'Запишите его: потом он не показывается',
-                border: OutlineInputBorder(),
-              ),
-            ),
+            _copyRow('Логин', login),
+            const SizedBox(height: 10),
+            _copyRow('Пароль', pass),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(dctx), child: const Text('ОТМЕНА')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F172A)),
-            onPressed: () async {
-              final login = loginController.text.trim();
-              final pass = passwordController.text.trim();
-              if (login.isEmpty || pass.isEmpty) {
-                _snack('Заполните логин и пароль', error: true);
-                return;
-              }
-              final err = await _post('/api/admin/requests/${data['id']}/approve',
-                  {'login': login, 'password': pass});
-              if (err != null) {
-                _snack(err, error: true); // диалог остаётся открытым
-                return;
-              }
-              if (dctx.mounted) Navigator.pop(dctx);
-              _snack('Заведение создано! Логин: $login, пароль: $pass');
-              _load(spinner: false);
-            },
-            child: const Text('СОХРАНИТЬ', style: TextStyle(color: Colors.white)),
+          TextButton(
+            onPressed: () => Navigator.pop(dctx),
+            child: const Text('Готово',
+                style: TextStyle(color: _ink, fontWeight: FontWeight.w700)),
           ),
         ],
       ),
     );
   }
 
-  Widget _detailItem(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 20),
+  Widget _copyRow(String label, String value) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 8, 4, 8),
+      decoration: BoxDecoration(
+        color: _bg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _line),
+      ),
       child: Row(
         children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-                color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(15)),
-            child: Icon(icon, color: const Color(0xFF475569), size: 22),
-          ),
-          const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label,
-                    style: const TextStyle(
-                        color: Colors.grey,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 0.5)),
-                Text(value,
-                    style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF1E293B))),
+                Text(label, style: const TextStyle(fontSize: 12, color: _muted)),
+                const SizedBox(height: 2),
+                SelectableText(
+                  value,
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w700, color: _ink),
+                ),
               ],
             ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.copy_rounded, color: _muted, size: 20),
+            onPressed: () => _copy(value),
           ),
         ],
       ),
     );
   }
 
-  Widget _actionButton(String title, Color color, VoidCallback onTap) {
-    return SizedBox(
-      height: 55,
-      child: ElevatedButton(
-        onPressed: onTap,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: color,
-          elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        ),
-        child: Text(title,
-            style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w800,
-                fontSize: 13,
-                letterSpacing: 1)),
-      ),
-    );
-  }
-
+  // ---------- ПУСТО / ОШИБКА ----------
   Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.auto_awesome_motion_rounded, size: 80, color: Colors.grey[200]),
-          const SizedBox(height: 16),
-          const Text('Очередь пуста',
-              style: TextStyle(
-                  color: Color(0xFF64748B), fontWeight: FontWeight.bold, fontSize: 18)),
-          const SizedBox(height: 8),
-          const Text('Потяните вниз или нажмите обновить', style: TextStyle(color: Colors.grey)),
-        ],
-      ),
+    return const Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.inbox_outlined, size: 48, color: _muted),
+        SizedBox(height: 14),
+        Text('Очередь пуста',
+            style: TextStyle(
+                color: _ink, fontWeight: FontWeight.w700, fontSize: 18)),
+        SizedBox(height: 6),
+        Text('Потяните вниз, чтобы обновить',
+            style: TextStyle(color: _muted, fontSize: 14)),
+      ],
     );
   }
 
@@ -448,15 +752,21 @@ class _AdminRequestsScreenState extends State<AdminRequestsScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.cloud_off_rounded, size: 60, color: Colors.redAccent),
-            const SizedBox(height: 16),
-            const Text('Ошибка связи с сервером',
-                style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFC62828))),
-            const SizedBox(height: 8),
+            const Icon(Icons.cloud_off_rounded, size: 44, color: _muted),
+            const SizedBox(height: 14),
+            const Text('Нет связи с сервером',
+                style: TextStyle(
+                    fontWeight: FontWeight.w700, fontSize: 17, color: _ink)),
+            const SizedBox(height: 6),
             Text(error,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 12, color: Colors.grey)),
-            TextButton(onPressed: () => _load(), child: const Text('Повторить')),
+                style: const TextStyle(fontSize: 13, color: _muted)),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () => _load(),
+              child: const Text('Повторить',
+                  style: TextStyle(color: _ink, fontWeight: FontWeight.w700)),
+            ),
           ],
         ),
       ),

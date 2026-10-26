@@ -12,6 +12,14 @@ class OrdersAdminScreen extends StatefulWidget {
 }
 
 class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
+  static const _bg = Color(0xFFF5F5F3);
+  static const _ink = Color(0xFF16181D);
+  static const _muted = Color(0xFF7B808A);
+  static const _line = Color(0xFFE2E3E6);
+  static const _accent = Color(0xFFF26B1D);
+  static const _green = Color(0xFF3FA66B);
+  static const _red = Color(0xFFD64545);
+
   String searchQuery = '';
   String filterStatus = 'all';
   final TextEditingController searchController = TextEditingController();
@@ -82,7 +90,6 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
     return [];
   }
 
-  // Размер и добавки позиции одной строкой
   String _itemTags(Map<String, dynamic> item) {
     final tags = <String>[];
     final size = (item['size'] ?? '').toString().trim();
@@ -127,7 +134,6 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
     }
   }
 
-  // группа статуса для фильтра
   String _group(String status) {
     final s = status.toLowerCase().replaceAll('_', '').trim();
     if (s == 'cancelled' || s == 'canceled') return 'cancelled';
@@ -138,11 +144,11 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
   Color _statusColor(String status) {
     switch (_group(status)) {
       case 'completed':
-        return Colors.green;
+        return _green;
       case 'cancelled':
-        return Colors.red;
+        return _red;
       default:
-        return Colors.orange;
+        return _accent;
     }
   }
 
@@ -174,84 +180,119 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
     }).toList();
   }
 
+  int _count(String id) {
+    if (id == 'all') return _orders.length;
+    return _orders.where((o) => _group((o['status'] ?? '').toString()) == id).length;
+  }
+
   // ---------- ЭКРАН ----------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0F172A),
-        iconTheme: const IconThemeData(color: Colors.white),
-        title: const Text('ЗАКАЗЫ (АДМИН)', style: TextStyle(color: Colors.white, fontSize: 16)),
-        actions: [
-          IconButton(
-              icon: const Icon(Icons.refresh_rounded, color: Colors.white),
-              onPressed: () => _load()),
-        ],
-      ),
-      body: Column(
-        children: [
-          Container(
-            color: const Color(0xFF0F172A),
-            padding: const EdgeInsets.all(16),
+      backgroundColor: _bg,
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760),
             child: Column(
               children: [
-                TextField(
-                  controller: searchController,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    hintText: 'Поиск: клиент, телефон, заведение...',
-                    hintStyle: const TextStyle(color: Colors.white54),
-                    prefixIcon: const Icon(Icons.search, color: Colors.white54),
-                    filled: true,
-                    fillColor: Colors.white.withOpacity(0.1),
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                  ),
-                  onChanged: (v) => setState(() => searchQuery = v),
-                ),
-                const SizedBox(height: 10),
-                _buildStatusChips(),
+                _buildHeader(),
+                Expanded(child: _buildBody()),
               ],
             ),
           ),
-          Expanded(child: _buildBody()),
+        ),
+      ),
+    );
+  }
+
+  Widget _squareButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    required String tooltip,
+  }) {
+    return Material(
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: _line),
+      ),
+      child: IconButton(
+        tooltip: tooltip,
+        icon: Icon(icon, color: _ink, size: 21),
+        onPressed: onTap,
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _squareButton(
+                icon: Icons.arrow_back_rounded,
+                tooltip: 'Назад',
+                onTap: () => Navigator.maybePop(context),
+              ),
+              const Spacer(),
+              _squareButton(
+                icon: Icons.refresh_rounded,
+                tooltip: 'Обновить',
+                onTap: () => _load(),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'Заказы',
+            style: TextStyle(
+              fontSize: 32,
+              fontWeight: FontWeight.w800,
+              color: _ink,
+              height: 1.1,
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: searchController,
+            style: const TextStyle(fontSize: 15, color: _ink),
+            onChanged: (v) => setState(() => searchQuery = v),
+            decoration: InputDecoration(
+              hintText: 'Клиент, телефон или заведение',
+              hintStyle: const TextStyle(color: _muted),
+              prefixIcon: const Icon(Icons.search_rounded, color: _muted),
+              suffixIcon: searchQuery.isEmpty
+                  ? null
+                  : IconButton(
+                icon: const Icon(Icons.close_rounded, color: _muted, size: 20),
+                onPressed: () {
+                  searchController.clear();
+                  setState(() => searchQuery = '');
+                },
+              ),
+              filled: true,
+              fillColor: Colors.white,
+              contentPadding: const EdgeInsets.symmetric(vertical: 16),
+              border: _border(_line),
+              enabledBorder: _border(_line),
+              focusedBorder: _border(_ink, 1.5),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildStatusChips(),
         ],
       ),
     );
   }
 
-  Widget _buildBody() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_error != null && _orders.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(_error!, textAlign: TextAlign.center),
-            TextButton(onPressed: () => _load(), child: const Text('Повторить')),
-          ],
-        ),
-      );
-    }
-    final data = _applyFilter(_orders);
-    return RefreshIndicator(
-      onRefresh: () => _load(spinner: false),
-      child: data.isEmpty
-          ? ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        children: const [
-          SizedBox(height: 120),
-          Center(child: Text('Заказов не найдено')),
-        ],
-      )
-          : ListView.builder(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(12),
-        itemCount: data.length,
-        itemBuilder: (context, index) => _buildOrderCard(data[index]),
-      ),
-    );
-  }
+  OutlineInputBorder _border(Color c, [double w = 1]) => OutlineInputBorder(
+    borderRadius: BorderRadius.circular(14),
+    borderSide: BorderSide(color: c, width: w),
+  );
 
   Widget _buildStatusChips() {
     final types = [
@@ -264,16 +305,46 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
       scrollDirection: Axis.horizontal,
       child: Row(
         children: types.map((t) {
-          final isSel = filterStatus == t['id'];
+          final id = t['id']!;
+          final isSel = filterStatus == id;
           return Padding(
             padding: const EdgeInsets.only(right: 8),
-            child: ChoiceChip(
-              label: Text(t['name']!,
-                  style: TextStyle(color: isSel ? Colors.white : Colors.white70)),
-              selected: isSel,
-              selectedColor: Colors.blueAccent,
-              backgroundColor: const Color(0xFF1E293B),
-              onSelected: (v) => setState(() => filterStatus = t['id']!),
+            child: GestureDetector(
+              onTap: () => setState(() => filterStatus = id),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                decoration: BoxDecoration(
+                  color: isSel ? Colors.white : Colors.transparent,
+                  borderRadius: BorderRadius.circular(22),
+                  border: Border.all(
+                    color: isSel ? _ink : _line,
+                    width: isSel ? 1.5 : 1,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      t['name']!,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: isSel ? FontWeight.w700 : FontWeight.w500,
+                        color: isSel ? _ink : _muted,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '${_count(id)}',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: isSel ? _muted : _line,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           );
         }).toList(),
@@ -281,14 +352,96 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
     );
   }
 
+  Widget _buildBody() {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator(color: _ink, strokeWidth: 2.5));
+    }
+    if (_error != null && _orders.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cloud_off_rounded, size: 40, color: _muted),
+              const SizedBox(height: 12),
+              Text(_error!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: _muted, fontSize: 15)),
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: () => _load(),
+                child: const Text('Повторить',
+                    style: TextStyle(color: _ink, fontWeight: FontWeight.w700)),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    final data = _applyFilter(_orders);
+    return RefreshIndicator(
+      color: _ink,
+      onRefresh: () => _load(spinner: false),
+      child: data.isEmpty
+          ? ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: const [
+          SizedBox(height: 100),
+          Icon(Icons.receipt_long_outlined, size: 40, color: _muted),
+          SizedBox(height: 12),
+          Center(
+            child: Text('Заказов не найдено',
+                style: TextStyle(color: _muted, fontSize: 15)),
+          ),
+        ],
+      )
+          : ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+        itemCount: data.length,
+        itemBuilder: (context, index) => _buildOrderCard(data[index]),
+      ),
+    );
+  }
+
+  Widget _statusPill(String status) {
+    final color = _statusColor(status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: _bg,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            _translateStatus(status),
+            style: const TextStyle(
+                fontSize: 12, fontWeight: FontWeight.w600, color: _ink),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildOrderCard(Map<String, dynamic> order) {
     final status = (order['status'] ?? 'new').toString();
-    final color = _statusColor(status);
     final items = _itemsOf(order['items']);
 
     final num productsTotal = order['items_price'] != null
         ? _n(order['items_price'])
-        : items.fold<num>(0, (s, i) => s + _n(i['price']) * (_n(i['quantity']) == 0 ? 1 : _n(i['quantity'])));
+        : items.fold<num>(
+        0,
+            (s, i) =>
+        s + _n(i['price']) * (_n(i['quantity']) == 0 ? 1 : _n(i['quantity'])));
     final num deliveryFee = _n(order['delivery_price']);
     final num totalCheck =
     order['total_price'] != null ? _n(order['total_price']) : productsTotal + deliveryFee;
@@ -298,118 +451,196 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
     final comment = (order['comment'] ?? '').toString().trim();
     final address = (order['client_address'] ?? '').toString().trim();
     final payment = (order['payment_method'] ?? '').toString();
+    final shop = (order['restaurant_name'] ?? '').toString();
 
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-      margin: const EdgeInsets.only(bottom: 12),
-      child: ExpansionTile(
-        title: Text((order['client_name'] ?? 'Клиент').toString(),
-            style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(
-          '${_translateStatus(status)} · $shortId'
-              '${created != null ? ' · ${DateFormat('dd.MM HH:mm').format(created)}' : ''}',
-          style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12),
+    final meta = [
+      shortId,
+      if (created != null) DateFormat('dd.MM HH:mm').format(created),
+      if (shop.isNotEmpty) shop,
+    ].join(' · ');
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _line),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Theme(
+        data: Theme.of(context).copyWith(
+          dividerColor: Colors.transparent,
+          splashColor: _bg,
+          highlightColor: Colors.transparent,
         ),
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
+          childrenPadding: EdgeInsets.zero,
+          iconColor: _muted,
+          collapsedIconColor: _muted,
+          shape: const Border(),
+          collapsedShape: const Border(),
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  (order['client_name'] ?? 'Клиент').toString(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w700, color: _ink),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${totalCheck.toInt()} Руб',
+                style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.w800, color: _ink),
+              ),
+            ],
+          ),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 6),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _infoRow(Icons.phone, 'Клиент:', (order['client_phone'] ?? '-').toString()),
-                _infoRow(Icons.storefront_rounded, 'Заведение:',
-                    (order['restaurant_name'] ?? '-').toString()),
-                if (address.isNotEmpty) _infoRow(Icons.location_on_outlined, 'Адрес:', address),
-                if (payment.isNotEmpty)
-                  _infoRow(Icons.payments_outlined, 'Оплата:', _translatePayment(payment)),
-                if (comment.isNotEmpty) _infoRow(Icons.chat_bubble_outline, 'Комментарий:', comment),
-                const Divider(),
-                const Text('ТОВАРЫ:',
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey)),
-                const SizedBox(height: 5),
-                ...items.map((item) {
-                  final qty = _n(item['quantity']) == 0 ? 1 : _n(item['quantity']);
-                  final tags = _itemTags(item);
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 3),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('${item['name']} x$qty', style: const TextStyle(fontSize: 13)),
-                              if (tags.isNotEmpty)
-                                Text(tags,
-                                    style: const TextStyle(
-                                        fontSize: 11,
-                                        color: Color(0xFF7C3AED),
-                                        fontWeight: FontWeight.w600)),
-                            ],
-                          ),
-                        ),
-                        Text('${(_n(item['price']) * qty).toInt()} Руб',
-                            style: const TextStyle(fontSize: 13)),
-                      ],
-                    ),
-                  );
-                }),
-                const Divider(),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Сумма товаров:',
-                        style: TextStyle(fontSize: 13, color: Colors.black54)),
-                    Text('${productsTotal.toInt()} Руб', style: const TextStyle(fontSize: 13)),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Доставка:',
-                        style: TextStyle(
-                            fontSize: 13, color: Colors.green, fontWeight: FontWeight.w600)),
-                    Text('${deliveryFee.toInt()} Руб',
-                        style: const TextStyle(
-                            fontSize: 13, color: Colors.green, fontWeight: FontWeight.bold)),
-                  ],
+                Text(
+                  meta,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 13, color: _muted),
                 ),
                 const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('ОБЩИЙ ЧЕК:', style: TextStyle(fontWeight: FontWeight.bold)),
-                    Text('${totalCheck.toInt()} Руб',
-                        style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w900,
-                            color: Color(0xFF0F172A))),
-                  ],
-                ),
+                _statusPill(status),
               ],
             ),
-          )
-        ],
+          ),
+          children: [
+            const Divider(height: 1, color: _line),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _infoRow(Icons.phone_outlined, 'Телефон',
+                      (order['client_phone'] ?? '-').toString()),
+                  if (address.isNotEmpty)
+                    _infoRow(Icons.location_on_outlined, 'Адрес', address),
+                  if (payment.isNotEmpty)
+                    _infoRow(Icons.payments_outlined, 'Оплата', _translatePayment(payment)),
+                  if (comment.isNotEmpty)
+                    _infoRow(Icons.chat_bubble_outline_rounded, 'Комментарий', comment),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'Состав заказа',
+                    style: TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w600, color: _muted),
+                  ),
+                  const SizedBox(height: 8),
+                  ...items.map((item) {
+                    final qty = _n(item['quantity']) == 0 ? 1 : _n(item['quantity']);
+                    final tags = _itemTags(item);
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 5),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            constraints: const BoxConstraints(minWidth: 30),
+                            padding:
+                            const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: _bg,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              '$qty×',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: _ink),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('${item['name']}',
+                                    style: const TextStyle(fontSize: 14, color: _ink)),
+                                if (tags.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 2),
+                                    child: Text(tags,
+                                        style: const TextStyle(
+                                            fontSize: 12, color: _muted)),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text('${(_n(item['price']) * qty).toInt()} Руб',
+                              style: const TextStyle(fontSize: 14, color: _ink)),
+                        ],
+                      ),
+                    );
+                  }),
+                  const SizedBox(height: 10),
+                  const Divider(height: 1, color: _line),
+                  const SizedBox(height: 12),
+                  _sumRow('Товары', '${productsTotal.toInt()} Руб'),
+                  const SizedBox(height: 6),
+                  _sumRow('Доставка', '${deliveryFee.toInt()} Руб'),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Итого',
+                          style: TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.w700, color: _ink)),
+                      Text('${totalCheck.toInt()} Руб',
+                          style: const TextStyle(
+                              fontSize: 22, fontWeight: FontWeight.w800, color: _ink)),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
+    );
+  }
+
+  Widget _sumRow(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 14, color: _muted)),
+        Text(value, style: const TextStyle(fontSize: 14, color: _ink)),
+      ],
     );
   }
 
   Widget _infoRow(IconData icon, String label, String value) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 16, color: Colors.grey),
-          const SizedBox(width: 8),
-          Text(label, style: const TextStyle(fontSize: 13, color: Colors.grey)),
-          const SizedBox(width: 4),
+          Icon(icon, size: 18, color: _muted),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 88,
+            child: Text(label, style: const TextStyle(fontSize: 13, color: _muted)),
+          ),
           Expanded(
-            child: Text(value,
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+            child: Text(
+              value,
+              style: const TextStyle(
+                  fontSize: 14, fontWeight: FontWeight.w600, color: _ink),
+            ),
           ),
         ],
       ),
