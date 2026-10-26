@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'Ypravlenie_zavedeniem.dart';
 import 'user.dart';
 import 'create_edit_order_screen.dart';
-import 'normal_delivery.dart';
 import 'order.dart';
 import 'Login_Screen.dart';
 import 'admin_requests_screen.dart';
@@ -114,17 +113,7 @@ class AdminHome extends StatelessWidget {
                       'Все заказы'
                   ),
 
-                  // 4. ЛОГИСТИКА
-                  _buildCard(
-                      context,
-                      'Логистика',
-                      Icons.local_shipping_rounded,
-                      Colors.teal,
-                      const AllCourierOrdersScreen(),
-                      'Курьеры'
-                  ),
-
-                  // 5. АНАЛИТИКА
+                  // 4. АНАЛИТИКА
                   _buildCard(
                       context,
                       'Аналитика',
@@ -134,7 +123,7 @@ class AdminHome extends StatelessWidget {
                       'Отчеты'
                   ),
 
-                  // 6. ЖУРНАЛ ДЕЙСТВИЙ (ЛОГИ)
+                  // 5. ЖУРНАЛ ДЕЙСТВИЙ (ЛОГИ)
                   _buildCard(
                       context,
                       'Журнал',
@@ -144,7 +133,7 @@ class AdminHome extends StatelessWidget {
                       'История админов'
                   ),
 
-                  // 7. ЗАВЕДЕНИЯ
+                  // 6. ЗАВЕДЕНИЯ
                   _buildCard(
                       context,
                       'Заведения',
