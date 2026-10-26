@@ -53,9 +53,10 @@ class AdminHome extends StatelessWidget {
           ),
           IconButton(
             icon: const Icon(Icons.logout_rounded, color: Colors.redAccent),
-            onPressed: () {
-              // Сбрасываем токен при выходе
-              Api.token = null;
+            onPressed: () async {
+              // Стираем сохранённый токен при выходе
+              await Api.clearSession();
+              if (!context.mounted) return;
               Navigator.pushReplacement(
                   context, MaterialPageRoute(builder: (_) => const LoginScreen()));
             },

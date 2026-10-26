@@ -49,9 +49,10 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       if (response.statusCode == 200 && body['success'] == true) {
-        Api.token = body['token'] as String;
         final admin = body['admin'] as Map<String, dynamic>;
         final adminName = (admin['name'] ?? login).toString();
+        await Api.saveSession(body['token'] as String, adminName); // запоминаем вход
+        if (!mounted) return;
 
         Navigator.pushReplacement(
           context,
