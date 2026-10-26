@@ -1,7 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'dart:async';
+import 'api.dart';
 
 class OrdersAdminScreen extends StatefulWidget {
   const OrdersAdminScreen({super.key});
@@ -15,173 +16,165 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
   String filterStatus = 'all';
   final TextEditingController searchController = TextEditingController();
 
-  // --- МЕТОД ПЕРЕВОДА ДЛЯ UI ---
+  List<Map<String, dynamic>> _orders = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    searchController.dispose();
+    super.dispose();
+  }
+
+  // ---------- СЕРВЕР ----------
+  Future<void> _load({bool spinner = true}) async {
+    if (spinner) setState(() => _loading = true);
+    try {
+      final r = await http
+          .get(Uri.parse('${Api.baseUrl}/api/admin/orders'), headers: Api.headers)
+          .timeout(const Duration(seconds: 15));
+      if (r.statusCode != 200) {
+        String msg = 'Ошибка сервера (${r.statusCode})';
+        try {
+          final b = jsonDecode(r.body);
+          if (b is Map && b['error'] != null) msg = b['error'].toString();
+        } catch (_) {}
+        throw Exception(msg);
+      }
+      final body = jsonDecode(r.body) as Map<String, dynamic>;
+      final list = (body['orders'] as List? ?? [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        _orders = list;
+        _loading = false;
+        _error = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e.toString().replaceFirst('Exception: ', '');
+      });
+    }
+  }
+
+  // ---------- ХЕЛПЕРЫ ----------
+  num _n(dynamic v) => v is num ? v : (num.tryParse('${v ?? ''}') ?? 0);
+
+  List<Map<String, dynamic>> _itemsOf(dynamic raw) {
+    dynamic v = raw;
+    if (v is String) {
+      try {
+        v = jsonDecode(v);
+      } catch (_) {}
+    }
+    if (v is List) {
+      return v.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+    }
+    return [];
+  }
+
+  // Размер и добавки позиции одной строкой
+  String _itemTags(Map<String, dynamic> item) {
+    final tags = <String>[];
+    final size = (item['size'] ?? '').toString().trim();
+    if (size.isNotEmpty && size != 'null') tags.add(size);
+    final mods = item['modifiers'];
+    if (mods is List) {
+      for (final m in mods) {
+        final n = (m is Map ? m['name'] : m)?.toString().trim() ?? '';
+        if (n.isNotEmpty) tags.add(n);
+      }
+    }
+    return tags.join(', ');
+  }
+
   String _translateStatus(String status) {
     final s = status.toLowerCase().replaceAll('_', '').trim();
     switch (s) {
-      case 'new': return 'Новый';
-      case 'pending': return 'В ожидании';
+      case 'new':
+        return 'Новый';
+      case 'pending':
+        return 'В ожидании';
       case 'accepted':
-      case 'принято': return 'Принято';
+        return 'Принято';
+      case 'preparing':
+        return 'Готовится';
+      case 'actionrequired':
+        return 'Ждёт ответа клиента';
+      case 'zamena':
+        return 'Замена принята';
       case 'inprogress':
-      case 'впроцессе': return 'В процессе';
+      case 'delivery':
+        return 'В пути';
       case 'ready':
-      case 'готовквыдаче': return 'Готов';
+        return 'Готов';
       case 'delivered':
-      case 'доставлено': return 'Доставлено';
+        return 'Доставлено';
       case 'cancelled':
-      case 'отменено': return 'Отменено';
-      default: return status;
+      case 'canceled':
+        return 'Отменено';
+      default:
+        return status;
     }
   }
 
-  // --- УЛУЧШЕННЫЙ ПОТОК ЗАКАЗОВ (REAL-TIME) ---
-  Stream<List<Map<String, dynamic>>> _getAllOrdersStream() {
-    return FirebaseFirestore.instance.collection('users').snapshots().transform(
-      StreamTransformer.fromHandlers(
-        handleData: (usersSnapshot, sink) async {
-          List<Map<String, dynamic>> allOrders = [];
-
-          for (var userDoc in usersSnapshot.docs) {
-            final userData = userDoc.data();
-            final userName = userData['name'] ?? 'Без имени';
-            final userPhone = userData['phone'] ?? '-';
-
-            final ordersSnapshot = await userDoc.reference.collection('orders').get();
-
-            for (var orderDoc in ordersSnapshot.docs) {
-              final orderData = orderDoc.data();
-
-              orderData['orderId'] = orderDoc.id;
-              orderData['userId'] = userDoc.id;
-              orderData['clientName'] ??= userName;
-              orderData['clientPhone'] ??= userPhone;
-
-              if (orderData['total'] == null) {
-                final items = (orderData['items'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
-                double total = 0;
-                for (var item in items) {
-                  total += (item['price'] ?? 0) * (item['quantity'] ?? 1);
-                }
-                orderData['total'] = total;
-              }
-              allOrders.add(orderData);
-            }
-          }
-
-          allOrders.sort((a, b) {
-            final aTime = a['createdAt'] is Timestamp ? (a['createdAt'] as Timestamp).toDate() : DateTime(2000);
-            final bTime = b['createdAt'] is Timestamp ? (b['createdAt'] as Timestamp).toDate() : DateTime(2000);
-            return bTime.compareTo(aTime);
-          });
-
-          sink.add(allOrders);
-        },
-      ),
-    );
-  }
-
-  // --- ЛОГИКА НАЗНАЧЕНИЯ КУРЬЕРА ---
-  Future<void> _assignCourier(String userId, String orderId, String cId, String cName, String cPhone) async {
-    try {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(userId)
-          .collection('orders')
-          .doc(orderId)
-          .update({
-        'courierId': cId,
-        'courierName': cName,
-        'courierPhone': cPhone,
-        'status': 'accepted',
-        'statusUpdatedAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Курьер $cName успешно назначен!')),
-        );
-      }
-    } catch (e) {
-      debugPrint('Ошибка назначения курьера: $e');
-    }
-  }
-
-  // --- ДИАЛОГ ВЫБОРА КУРЬЕРА ---
-  void _showAssignCourierDialog(String userId, String orderId) {
-    if (userId.isEmpty || orderId.isEmpty) return;
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Выбор курьера'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance
-                .collection('couriers')
-                .where('active', isEqualTo: true)
-                .snapshots(),
-            builder: (context, snapshot) {
-              if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-              final docs = snapshot.data!.docs;
-              if (docs.isEmpty) return const Text('Нет активных курьеров');
-
-              return ListView.builder(
-                shrinkWrap: true,
-                itemCount: docs.length,
-                itemBuilder: (context, index) {
-                  final c = docs[index].data() as Map<String, dynamic>;
-                  final name = c['name'] ?? 'Без имени';
-                  final phone = c['phone'] ?? '-';
-
-                  return ListTile(
-                    leading: const Icon(Icons.delivery_dining, color: Colors.orange),
-                    title: Text(name),
-                    subtitle: Text(phone),
-                    onTap: () {
-                      Navigator.pop(context);
-                      _assignCourier(userId, orderId, docs[index].id, name, phone);
-                    },
-                  );
-                },
-              );
-            },
-          ),
-        ),
-      ),
-    );
+  // группа статуса для фильтра
+  String _group(String status) {
+    final s = status.toLowerCase().replaceAll('_', '').trim();
+    if (s == 'cancelled' || s == 'canceled') return 'cancelled';
+    if (s == 'delivered' || s == 'completed' || s == 'ready') return 'completed';
+    return 'pending';
   }
 
   Color _statusColor(String status) {
-    final s = status.toLowerCase().replaceAll('_', '').trim();
-    if (s == 'completed' || s == 'delivered' || s == 'ready') return Colors.green;
-    if (s == 'cancelled' || s == 'canceled' || s == 'отменено') return Colors.red;
-    if (s == 'pending' || s == 'new' || s == 'accepted' || s == 'принято') return Colors.orange;
-    return Colors.blueGrey;
+    switch (_group(status)) {
+      case 'completed':
+        return Colors.green;
+      case 'cancelled':
+        return Colors.red;
+      default:
+        return Colors.orange;
+    }
   }
 
-  List<Map<String, dynamic>> _applyFilter(List<Map<String, dynamic>> allOrders) {
-    return allOrders.where((order) {
-      final name = (order['clientName'] ?? '').toString().toLowerCase();
-      final statusFromDb = (order['status'] ?? '').toString().toLowerCase().replaceAll('_', '').trim();
-      final matchesSearch = name.contains(searchQuery.toLowerCase());
+  String _translatePayment(String m) {
+    switch (m.toLowerCase()) {
+      case 'cash':
+        return 'Наличные';
+      case 'online':
+        return 'Онлайн';
+      case 'card':
+        return 'Картой';
+      case 'qr':
+        return 'QR';
+      default:
+        return m;
+    }
+  }
 
-      bool matchesStatus = filterStatus == 'all';
-      if (!matchesStatus) {
-        if (filterStatus == 'pending') {
-          matchesStatus = (statusFromDb == 'pending' || statusFromDb == 'new' || statusFromDb == 'accepted' || statusFromDb == 'принято' || statusFromDb == 'inprogress');
-        } else if (filterStatus == 'completed') {
-          matchesStatus = (statusFromDb == 'completed' || statusFromDb == 'delivered' || statusFromDb == 'ready');
-        } else if (filterStatus == 'cancelled') {
-          matchesStatus = (statusFromDb == 'cancelled' || statusFromDb == 'canceled' || statusFromDb == 'отменено');
-        }
-      }
+  List<Map<String, dynamic>> _applyFilter(List<Map<String, dynamic>> all) {
+    final q = searchQuery.toLowerCase();
+    return all.where((o) {
+      final name = (o['client_name'] ?? '').toString().toLowerCase();
+      final phone = (o['client_phone'] ?? '').toString().toLowerCase();
+      final shop = (o['restaurant_name'] ?? '').toString().toLowerCase();
+      final matchesSearch = name.contains(q) || phone.contains(q) || shop.contains(q);
+      final matchesStatus =
+          filterStatus == 'all' || _group((o['status'] ?? '').toString()) == filterStatus;
       return matchesSearch && matchesStatus;
     }).toList();
   }
 
+  // ---------- ЭКРАН ----------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -189,6 +182,11 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
         backgroundColor: const Color(0xFF0F172A),
         iconTheme: const IconThemeData(color: Colors.white),
         title: const Text('ЗАКАЗЫ (АДМИН)', style: TextStyle(color: Colors.white, fontSize: 16)),
+        actions: [
+          IconButton(
+              icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+              onPressed: () => _load()),
+        ],
       ),
       body: Column(
         children: [
@@ -201,12 +199,13 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
                   controller: searchController,
                   style: const TextStyle(color: Colors.white),
                   decoration: InputDecoration(
-                    hintText: 'Поиск клиента...',
+                    hintText: 'Поиск: клиент, телефон, заведение...',
                     hintStyle: const TextStyle(color: Colors.white54),
                     prefixIcon: const Icon(Icons.search, color: Colors.white54),
                     filled: true,
                     fillColor: Colors.white.withOpacity(0.1),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                   ),
                   onChanged: (v) => setState(() => searchQuery = v),
                 ),
@@ -215,23 +214,41 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
               ],
             ),
           ),
-          Expanded(
-            child: StreamBuilder<List<Map<String, dynamic>>>(
-              stream: _getAllOrdersStream(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-                final data = _applyFilter(snapshot.data ?? []);
-                if (data.isEmpty) return const Center(child: Text('Заказов не найдено'));
-
-                return ListView.builder(
-                  padding: const EdgeInsets.all(12),
-                  itemCount: data.length,
-                  itemBuilder: (context, index) => _buildOrderCard(data[index]),
-                );
-              },
-            ),
-          ),
+          Expanded(child: _buildBody()),
         ],
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_error != null && _orders.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(_error!, textAlign: TextAlign.center),
+            TextButton(onPressed: () => _load(), child: const Text('Повторить')),
+          ],
+        ),
+      );
+    }
+    final data = _applyFilter(_orders);
+    return RefreshIndicator(
+      onRefresh: () => _load(spinner: false),
+      child: data.isEmpty
+          ? ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: const [
+          SizedBox(height: 120),
+          Center(child: Text('Заказов не найдено')),
+        ],
+      )
+          : ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(12),
+        itemCount: data.length,
+        itemBuilder: (context, index) => _buildOrderCard(data[index]),
       ),
     );
   }
@@ -251,7 +268,8 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
           return Padding(
             padding: const EdgeInsets.only(right: 8),
             child: ChoiceChip(
-              label: Text(t['name']!, style: TextStyle(color: isSel ? Colors.white : Colors.white70)),
+              label: Text(t['name']!,
+                  style: TextStyle(color: isSel ? Colors.white : Colors.white70)),
               selected: isSel,
               selectedColor: Colors.blueAccent,
               backgroundColor: const Color(0xFF1E293B),
@@ -266,55 +284,84 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
   Widget _buildOrderCard(Map<String, dynamic> order) {
     final status = (order['status'] ?? 'new').toString();
     final color = _statusColor(status);
+    final items = _itemsOf(order['items']);
 
-    final String? courierId = order['courierId'];
-    final String courierDisplay = order['courierName'] ?? order['courierPhone'] ?? 'НЕ НАЗНАЧЕН';
+    final num productsTotal = order['items_price'] != null
+        ? _n(order['items_price'])
+        : items.fold<num>(0, (s, i) => s + _n(i['price']) * (_n(i['quantity']) == 0 ? 1 : _n(i['quantity'])));
+    final num deliveryFee = _n(order['delivery_price']);
+    final num totalCheck =
+    order['total_price'] != null ? _n(order['total_price']) : productsTotal + deliveryFee;
 
-    final userId = order['userId'] ?? '';
-    final orderId = order['orderId'] ?? '';
-
-    // 🔹 Расчет цен
-    final items = (order['items'] as List? ?? []);
-    double productsTotal = 0;
-    for (var item in items) {
-      productsTotal += (item['price'] ?? 0) * (item['quantity'] ?? 1);
-    }
-    final double deliveryFee = (order['deliveryPrice'] ?? 0).toDouble();
-    final double totalCheck = (order['total'] ?? (productsTotal + deliveryFee)).toDouble();
+    final created = DateTime.tryParse('${order['created_at']}')?.toLocal();
+    final shortId = '№${order['id']}';
+    final comment = (order['comment'] ?? '').toString().trim();
+    final address = (order['client_address'] ?? '').toString().trim();
+    final payment = (order['payment_method'] ?? '').toString();
 
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
       margin: const EdgeInsets.only(bottom: 12),
       child: ExpansionTile(
-        title: Text(order['clientName'] ?? 'Клиент', style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(_translateStatus(status), style: TextStyle(color: color, fontWeight: FontWeight.bold)),
+        title: Text((order['client_name'] ?? 'Клиент').toString(),
+            style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Text(
+          '${_translateStatus(status)} · $shortId'
+              '${created != null ? ' · ${DateFormat('dd.MM HH:mm').format(created)}' : ''}',
+          style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12),
+        ),
         children: [
           Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _infoRow(Icons.phone, 'Клиент:', order['clientPhone'] ?? '-'),
-                _infoRow(Icons.delivery_dining, 'Курьер:', courierDisplay),
+                _infoRow(Icons.phone, 'Клиент:', (order['client_phone'] ?? '-').toString()),
+                _infoRow(Icons.storefront_rounded, 'Заведение:',
+                    (order['restaurant_name'] ?? '-').toString()),
+                if (address.isNotEmpty) _infoRow(Icons.location_on_outlined, 'Адрес:', address),
+                if (payment.isNotEmpty)
+                  _infoRow(Icons.payments_outlined, 'Оплата:', _translatePayment(payment)),
+                if (comment.isNotEmpty) _infoRow(Icons.chat_bubble_outline, 'Комментарий:', comment),
                 const Divider(),
-                const Text('ТОВАРЫ:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey)),
+                const Text('ТОВАРЫ:',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey)),
                 const SizedBox(height: 5),
-                ...items.map((item) => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('${item['name']} x${item['quantity']}', style: const TextStyle(fontSize: 13)),
-                      Text('${((item['price'] ?? 0) * (item['quantity'] ?? 1)).toInt()} Руб', style: const TextStyle(fontSize: 13)),
-                    ],
-                  ),
-                )),
+                ...items.map((item) {
+                  final qty = _n(item['quantity']) == 0 ? 1 : _n(item['quantity']);
+                  final tags = _itemTags(item);
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 3),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('${item['name']} x$qty', style: const TextStyle(fontSize: 13)),
+                              if (tags.isNotEmpty)
+                                Text(tags,
+                                    style: const TextStyle(
+                                        fontSize: 11,
+                                        color: Color(0xFF7C3AED),
+                                        fontWeight: FontWeight.w600)),
+                            ],
+                          ),
+                        ),
+                        Text('${(_n(item['price']) * qty).toInt()} Руб',
+                            style: const TextStyle(fontSize: 13)),
+                      ],
+                    ),
+                  );
+                }),
                 const Divider(),
-                // 🔹 Отображение разделения цены
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Сумма товаров:', style: TextStyle(fontSize: 13, color: Colors.black54)),
+                    const Text('Сумма товаров:',
+                        style: TextStyle(fontSize: 13, color: Colors.black54)),
                     Text('${productsTotal.toInt()} Руб', style: const TextStyle(fontSize: 13)),
                   ],
                 ),
@@ -322,8 +369,12 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Доход курьера:', style: TextStyle(fontSize: 13, color: Colors.green, fontWeight: FontWeight.w600)),
-                    Text('${deliveryFee.toInt()} Руб', style: const TextStyle(fontSize: 13, color: Colors.green, fontWeight: FontWeight.bold)),
+                    const Text('Доставка:',
+                        style: TextStyle(
+                            fontSize: 13, color: Colors.green, fontWeight: FontWeight.w600)),
+                    Text('${deliveryFee.toInt()} Руб',
+                        style: const TextStyle(
+                            fontSize: 13, color: Colors.green, fontWeight: FontWeight.bold)),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -331,27 +382,13 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     const Text('ОБЩИЙ ЧЕК:', style: TextStyle(fontWeight: FontWeight.bold)),
-                    Text('${totalCheck.toInt()} Руб', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Color(0xFF0F172A))),
+                    Text('${totalCheck.toInt()} Руб',
+                        style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                            color: Color(0xFF0F172A))),
                   ],
                 ),
-                if ((courierId == null || courierId == 'courierId' || courierId.isEmpty) &&
-                    status != 'delivered' && status != 'cancelled')
-                  Padding(
-                    padding: const EdgeInsets.only(top: 15),
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: () => _showAssignCourierDialog(userId, orderId),
-                        icon: const Icon(Icons.person_add),
-                        label: const Text('НАЗНАЧИТЬ КУРЬЕРА'),
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.orange,
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))
-                        ),
-                      ),
-                    ),
-                  ),
               ],
             ),
           )
@@ -364,12 +401,16 @@ class _OrdersAdminScreenState extends State<OrdersAdminScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(icon, size: 16, color: Colors.grey),
           const SizedBox(width: 8),
           Text(label, style: const TextStyle(fontSize: 13, color: Colors.grey)),
           const SizedBox(width: 4),
-          Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+          Expanded(
+            child: Text(value,
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+          ),
         ],
       ),
     );

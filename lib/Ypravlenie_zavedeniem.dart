@@ -1,5 +1,7 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'api.dart';
 
 class AdminShopsScreen extends StatefulWidget {
   final String currentAdminName;
@@ -16,7 +18,11 @@ class AdminShopsScreen extends StatefulWidget {
 class _AdminShopsScreenState extends State<AdminShopsScreen> {
   String _searchQuery = '';
   String _filterStatus = 'all'; // 'all', 'active', 'disabled'
-  String _selectedCategoryKey = 'all'; // Фильтр по конкретному типу заведения
+  String _selectedCategoryKey = 'all';
+
+  List<Map<String, dynamic>> _shops = [];
+  bool _loading = true;
+  String? _error;
 
   // Словарь переводов
   final Map<String, String> _translations = {
@@ -29,28 +35,87 @@ class _AdminShopsScreenState extends State<AdminShopsScreen> {
     'stroimaterial': 'Строй магазины',
   };
 
-  // Функция для перевода английских системных типов в читаемый русский
   String _translateCategory(String rawCategory) {
     final lowerKey = rawCategory.toLowerCase().trim();
-    return _translations[lowerKey] ?? (rawCategory.isNotEmpty
-        ? rawCategory[0].toUpperCase() + rawCategory.substring(1)
-        : 'Категория');
+    return _translations[lowerKey] ??
+        (rawCategory.isNotEmpty
+            ? rawCategory[0].toUpperCase() + rawCategory.substring(1)
+            : 'Категория');
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  // ---------- СЕРВЕР ----------
+  String _errText(http.Response r) {
+    String msg = 'Ошибка сервера (${r.statusCode})';
+    try {
+      final b = jsonDecode(r.body);
+      if (b is Map && b['error'] != null) msg = b['error'].toString();
+    } catch (_) {}
+    return msg;
+  }
+
+  Future<void> _load({bool spinner = true}) async {
+    if (spinner) setState(() => _loading = true);
+    try {
+      final r = await http
+          .get(Uri.parse('${Api.baseUrl}/api/admin/shops'), headers: Api.headers)
+          .timeout(const Duration(seconds: 15));
+      if (r.statusCode != 200) throw Exception(_errText(r));
+      final body = jsonDecode(r.body) as Map<String, dynamic>;
+      final list = (body['shops'] as List? ?? [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        _shops = list;
+        _loading = false;
+        _error = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e.toString().replaceFirst('Exception: ', '');
+      });
+    }
+  }
+
+  Future<void> _toggle(Map<String, dynamic> shop, bool value) async {
+    final old = shop['is_active'] == true;
+    setState(() => shop['is_active'] = value); // сразу показываем
+    try {
+      final r = await http
+          .patch(Uri.parse('${Api.baseUrl}/api/admin/shops/${shop['id']}/active'),
+          headers: Api.headers, body: jsonEncode({'is_active': value}))
+          .timeout(const Duration(seconds: 15));
+      if (r.statusCode != 200) throw Exception(_errText(r));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => shop['is_active'] = old); // откат
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(e.toString().replaceFirst('Exception: ', '')),
+        backgroundColor: Colors.redAccent,
+      ));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    // Превращаем ключи в список для удобного разделения по рядам
     final keysList = _translations.keys.toList();
-    // Первые 4 штуки (включая 'all' как отдельный элемент или делим пополам)
-    // Сделаем так: первый ряд — «Все типы» + 3 категории, второй ряд — оставшиеся 4
 
     return Scaffold(
       backgroundColor: const Color(0xFFF1F5F9),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0F172A),
+        iconTheme: const IconThemeData(color: Colors.white),
         elevation: 0,
         title: const Text(
-          'УПРАВЛЕНИЕ МАГАЗИНАМИ',
+          'УПРАВЛЕНИЕ ЗАВЕДЕНИЯМИ',
           style: TextStyle(
             fontWeight: FontWeight.w900,
             letterSpacing: 1.2,
@@ -58,10 +123,15 @@ class _AdminShopsScreenState extends State<AdminShopsScreen> {
             color: Colors.white,
           ),
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+            onPressed: () => _load(),
+          ),
+        ],
       ),
       body: Column(
         children: [
-          // Панель поиска и фильтрации
           Container(
             padding: const EdgeInsets.all(16.0),
             color: Colors.white,
@@ -83,8 +153,6 @@ class _AdminShopsScreenState extends State<AdminShopsScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-
-                // Фильтры по статусу (Активные / Отключенные)
                 Row(
                   children: [
                     _buildStatusChip('Все статусы', 'all'),
@@ -94,15 +162,12 @@ class _AdminShopsScreenState extends State<AdminShopsScreen> {
                     _buildStatusChip('Отключенные', 'disabled'),
                   ],
                 ),
-
                 const SizedBox(height: 12),
                 const Text(
                   'Фильтр по типам:',
                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
                 ),
                 const SizedBox(height: 6),
-
-                // 1-й ряд фильтров (4 штуки)
                 Row(
                   children: [
                     Expanded(child: _buildCategoryChip('Все типы', 'all')),
@@ -115,7 +180,6 @@ class _AdminShopsScreenState extends State<AdminShopsScreen> {
                   ],
                 ),
                 const SizedBox(height: 6),
-                // 2-й ряд фильтров (оставшиеся категории)
                 Row(
                   children: [
                     if (keysList.length > 3) Expanded(child: _buildCategoryChip(_translations[keysList[3]]!, keysList[3])) else const Spacer(),
@@ -130,26 +194,28 @@ class _AdminShopsScreenState extends State<AdminShopsScreen> {
               ],
             ),
           ),
-
-          // Список заведений из коллекции /categories в Firestore
-          Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance.collection('categories').snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return Center(child: Text('Ошибка загрузки: ${snapshot.error}'));
-                }
-
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                return _buildShopsList(snapshot.data!.docs);
-              },
-            ),
-          ),
+          Expanded(child: _buildBody()),
         ],
       ),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_error != null && _shops.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Ошибка загрузки: $_error', textAlign: TextAlign.center),
+            TextButton(onPressed: () => _load(), child: const Text('Повторить')),
+          ],
+        ),
+      );
+    }
+    return RefreshIndicator(
+      onRefresh: () => _load(spinner: false),
+      child: _buildShopsList(_shops),
     );
   }
 
@@ -197,56 +263,41 @@ class _AdminShopsScreenState extends State<AdminShopsScreen> {
     );
   }
 
-  Widget _buildShopsList(List<QueryDocumentSnapshot> docs) {
-    // Фильтрация по поиску, статусу и конкретному типу
-    final filteredDocs = docs.where((doc) {
-      final data = doc.data() as Map<String, dynamic>;
-      final name = (data['name'] ?? data['title'] ?? 'Без названия').toString().toLowerCase();
+  Widget _buildShopsList(List<Map<String, dynamic>> shops) {
+    final filtered = shops.where((data) {
+      final name = (data['name'] ?? 'Без названия').toString().toLowerCase();
+      final bool isActive = data['is_active'] == true;
+      final rawCategory = (data['category'] ?? '').toString().toLowerCase().trim();
 
-      // Поле активности
-      final bool isActive = data['isActive'] ?? data['isOnline'] ?? true;
-
-      // Сырая категория из БД
-      final rawCategory = (data['category'] ?? data['type'] ?? '').toString().toLowerCase().trim();
-
-      // Проверка текста поиска
-      final matchesSearch = name.contains(_searchQuery);
-
-      // Проверка фильтра статуса
       if (_filterStatus == 'active' && !isActive) return false;
       if (_filterStatus == 'disabled' && isActive) return false;
-
-      // Проверка фильтра по типу заведения
-      if (_selectedCategoryKey != 'all' && rawCategory != _selectedCategoryKey) {
-        return false;
-      }
-
-      return matchesSearch;
+      if (_selectedCategoryKey != 'all' && rawCategory != _selectedCategoryKey) return false;
+      return name.contains(_searchQuery);
     }).toList();
 
-    if (filteredDocs.isEmpty) {
-      return const Center(
-        child: Text(
-          'Заведения не найдены',
-          style: TextStyle(color: Colors.grey, fontSize: 14),
-        ),
+    if (filtered.isEmpty) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: const [
+          SizedBox(height: 120),
+          Center(
+            child: Text('Заведения не найдены',
+                style: TextStyle(color: Colors.grey, fontSize: 14)),
+          ),
+        ],
       );
     }
 
     return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
-      itemCount: filteredDocs.length,
+      itemCount: filtered.length,
       itemBuilder: (context, index) {
-        final doc = filteredDocs[index];
-        final data = doc.data() as Map<String, dynamic>;
-
-        final shopName = data['name'] ?? data['title'] ?? 'Заведение без имени';
-
-        // Получаем сырые данные категории и переводим их через метод
-        final rawCategory = data['category'] ?? data['type'] ?? 'general';
-        final translatedCategory = _translateCategory(rawCategory.toString());
-
-        final bool isActive = data['isActive'] ?? data['isOnline'] ?? true;
+        final data = filtered[index];
+        final shopName = (data['name'] ?? 'Заведение без имени').toString();
+        final rawCategory = (data['category'] ?? 'general').toString();
+        final translatedCategory = _translateCategory(rawCategory);
+        final bool isActive = data['is_active'] == true;
 
         return Container(
           margin: const EdgeInsets.only(bottom: 12),
@@ -282,7 +333,8 @@ class _AdminShopsScreenState extends State<AdminShopsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 4),
-                Text('Тип: $translatedCategory', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                Text('Тип: $translatedCategory',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey)),
                 const SizedBox(height: 2),
                 Text(
                   isActive ? 'Статус: Работает в системе' : 'Статус: Отключен от сервиса',
@@ -297,13 +349,7 @@ class _AdminShopsScreenState extends State<AdminShopsScreen> {
             trailing: Switch.adaptive(
               value: isActive,
               activeColor: Colors.green,
-              onChanged: (bool value) async {
-                // Моментальное обновление в Firestore по пути /categories/{docId}
-                await doc.reference.update({
-                  'isActive': value,
-                  'isOnline': value,
-                });
-              },
+              onChanged: (bool value) => _toggle(data, value),
             ),
           ),
         );

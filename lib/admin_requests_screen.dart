@@ -1,21 +1,94 @@
+import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:http/http.dart' as http;
+import 'api.dart';
 
-class AdminRequestsScreen extends StatelessWidget {
-  final String currentAdminName; // Добавили имя админа для логирования
+class AdminRequestsScreen extends StatefulWidget {
+  final String currentAdminName;
 
   const AdminRequestsScreen({super.key, required this.currentAdminName});
 
-  // Внутренний метод для записи в коллекцию admin_logs
-  Future<void> _logAction(String action, String target) async {
-    await FirebaseFirestore.instance.collection('admin_logs').add({
-      'adminName': currentAdminName,
-      'action': action,
-      'target': target,
-      'timestamp': FieldValue.serverTimestamp(),
-    });
+  @override
+  State<AdminRequestsScreen> createState() => _AdminRequestsScreenState();
+}
+
+class _AdminRequestsScreenState extends State<AdminRequestsScreen> {
+  List<Map<String, dynamic>> _requests = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
   }
 
+  // ---------- СЕРВЕР ----------
+  String _errText(http.Response r) {
+    String msg = 'Ошибка сервера (${r.statusCode})';
+    try {
+      final b = jsonDecode(r.body);
+      if (b is Map && b['error'] != null) msg = b['error'].toString();
+    } catch (_) {}
+    return msg;
+  }
+
+  Future<void> _load({bool spinner = true}) async {
+    if (spinner) setState(() => _loading = true);
+    try {
+      final r = await http
+          .get(Uri.parse('${Api.baseUrl}/api/admin/requests'), headers: Api.headers)
+          .timeout(const Duration(seconds: 15));
+      if (r.statusCode != 200) throw Exception(_errText(r));
+      final body = jsonDecode(r.body) as Map<String, dynamic>;
+      final list = (body['requests'] as List? ?? [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        _requests = list;
+        _loading = false;
+        _error = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e.toString().replaceFirst('Exception: ', '');
+      });
+    }
+  }
+
+  // Возвращает null при успехе или текст ошибки
+  Future<String?> _post(String path, [Map<String, dynamic>? body]) async {
+    try {
+      final r = await http
+          .post(Uri.parse('${Api.baseUrl}$path'),
+          headers: Api.headers, body: jsonEncode(body ?? {}))
+          .timeout(const Duration(seconds: 15));
+      if (r.statusCode != 200) return _errText(r);
+      return null;
+    } catch (e) {
+      return 'Нет связи с сервером: $e';
+    }
+  }
+
+  void _snack(String text, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(text),
+      backgroundColor: error ? Colors.redAccent : const Color(0xFF0F172A),
+    ));
+  }
+
+  String _randomPassword() {
+    const chars = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    final rnd = Random.secure();
+    return List.generate(10, (_) => chars[rnd.nextInt(chars.length)]).join();
+  }
+
+  // ---------- ЭКРАН ----------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -35,73 +108,46 @@ class AdminRequestsScreen extends StatelessWidget {
                   letterSpacing: 1.2,
                   color: Colors.white),
             ),
-            Text('Админ: $currentAdminName',
+            Text('Админ: ${widget.currentAdminName}',
                 style: const TextStyle(color: Colors.white60, fontSize: 9)),
           ],
         ),
+        actions: [
+          IconButton(
+              icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+              onPressed: () => _load()),
+        ],
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('business_requests')
-            .where('status', isEqualTo: 'pending')
-            .orderBy('createdAt', descending: true)
-            .snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            if (snapshot.error.toString().contains('failed-precondition') ||
-                snapshot.error.toString().contains('index')) {
-              return _buildEmergencyStream();
-            }
-            return _buildErrorState(snapshot.error.toString());
-          }
+      body: _buildBody(),
+    );
+  }
 
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(
-              child: CircularProgressIndicator(color: Color(0xFF0F172A)),
-            );
-          }
-
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return _buildEmptyState();
-          }
-
-          return _buildListView(snapshot.data!.docs);
-        },
+  Widget _buildBody() {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator(color: Color(0xFF0F172A)));
+    }
+    if (_error != null && _requests.isEmpty) return _buildErrorState(_error!);
+    return RefreshIndicator(
+      onRefresh: () => _load(spinner: false),
+      child: _requests.isEmpty
+          ? ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          SizedBox(height: MediaQuery.of(context).size.height * 0.25),
+          _buildEmptyState(),
+        ],
+      )
+          : ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        itemCount: _requests.length,
+        itemBuilder: (context, index) => _buildRequestCard(context, _requests[index]),
       ),
     );
   }
 
-  Widget _buildEmergencyStream() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('business_requests')
-          .where('status', isEqualTo: 'pending')
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
-          return _buildListView(snapshot.data!.docs);
-        }
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        return _buildEmptyState();
-      },
-    );
-  }
-
-  Widget _buildListView(List<QueryDocumentSnapshot> docs) {
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: docs.length,
-      itemBuilder: (context, index) {
-        var doc = docs[index];
-        var data = doc.data() as Map<String, dynamic>;
-        return _buildRequestCard(context, data, doc.id);
-      },
-    );
-  }
-
-  Widget _buildRequestCard(BuildContext context, Map<String, dynamic> data, String docId) {
+  Widget _buildRequestCard(BuildContext context, Map<String, dynamic> data) {
+    final logo = (data['logo_url'] ?? '').toString();
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
@@ -122,42 +168,39 @@ class AdminRequestsScreen extends StatelessWidget {
           decoration: BoxDecoration(
             color: const Color(0xFFF1F5F9),
             borderRadius: BorderRadius.circular(15),
-            image: data['logoUrl'] != null && data['logoUrl'].toString().isNotEmpty
-                ? DecorationImage(
-                image: NetworkImage(data['logoUrl']), fit: BoxFit.cover)
+            image: logo.isNotEmpty
+                ? DecorationImage(image: NetworkImage(logo), fit: BoxFit.cover)
                 : null,
           ),
-          child: data['logoUrl'] == null || data['logoUrl'].toString().isEmpty
-              ? const Icon(Icons.storefront, color: Color(0xFF64748B))
-              : null,
+          child: logo.isEmpty ? const Icon(Icons.storefront, color: Color(0xFF64748B)) : null,
         ),
         title: Text(
-          data['businessName'] ?? 'Без названия',
+          (data['name'] ?? 'Без названия').toString(),
           style: const TextStyle(
               fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1E293B)),
         ),
         subtitle: Padding(
           padding: const EdgeInsets.only(top: 4),
           child: Text(
-            data['address'] ?? 'Адрес не указан',
+            (data['phone'] ?? 'Телефон не указан').toString(),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: Color(0xFF64748B), fontSize: 13),
           ),
         ),
-        trailing: const Icon(Icons.arrow_forward_ios_rounded,
-            size: 14, color: Color(0xFFCBD5E1)),
-        onTap: () => _showDetails(context, data, docId),
+        trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Color(0xFFCBD5E1)),
+        onTap: () => _showDetails(context, data),
       ),
     );
   }
 
-  void _showDetails(BuildContext context, Map<String, dynamic> data, String docId) {
+  void _showDetails(BuildContext context, Map<String, dynamic> data) {
+    final logo = (data['logo_url'] ?? '').toString();
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => Container(
+      builder: (sheetCtx) => Container(
         height: MediaQuery.of(context).size.height * 0.85,
         decoration: const BoxDecoration(
           color: Colors.white,
@@ -180,6 +223,7 @@ class AdminRequestsScreen extends StatelessWidget {
                       width: 120,
                       height: 120,
                       decoration: BoxDecoration(
+                        color: const Color(0xFFF1F5F9),
                         borderRadius: BorderRadius.circular(30),
                         boxShadow: [
                           BoxShadow(
@@ -187,49 +231,46 @@ class AdminRequestsScreen extends StatelessWidget {
                               blurRadius: 20,
                               offset: const Offset(0, 10))
                         ],
-                        image: data['logoUrl'] != null
-                            ? DecorationImage(image: NetworkImage(data['logoUrl']), fit: BoxFit.cover)
+                        image: logo.isNotEmpty
+                            ? DecorationImage(image: NetworkImage(logo), fit: BoxFit.cover)
                             : null,
                       ),
-                      child: data['logoUrl'] == null ? const Icon(Icons.store, size: 50) : null,
+                      child: logo.isEmpty ? const Icon(Icons.store, size: 50) : null,
                     ),
                   ),
                   const SizedBox(height: 24),
                   Text(
-                    data['businessName'] ?? 'Заявка',
+                    (data['name'] ?? 'Заявка').toString(),
                     textAlign: TextAlign.center,
                     style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w900,
-                        color: Color(0xFF0F172A)),
+                        fontSize: 24, fontWeight: FontWeight.w900, color: Color(0xFF0F172A)),
                   ),
                   const SizedBox(height: 32),
-                  _detailItem(Icons.alternate_email_rounded, "Email",
-                      data['contactEmail'] ?? 'Не указан'),
-                  _detailItem(Icons.phone_android_rounded, "Телефон",
-                      data['phone'] ?? 'Не указан'),
-                  _detailItem(Icons.map_rounded, "Адрес", data['address'] ?? 'Не указан'),
-
+                  _detailItem(Icons.alternate_email_rounded, 'Контакт (логин по умолчанию)',
+                      (data['login'] ?? 'Не указан').toString()),
+                  _detailItem(Icons.phone_android_rounded, 'Телефон',
+                      (data['phone'] ?? 'Не указан').toString()),
                   if (data['lat'] != null && data['lng'] != null)
-                    _detailItem(Icons.location_on_rounded, "Координаты",
-                        "${data['lat']}, ${data['lng']}"),
-
-                  _detailItem(Icons.access_time_filled_rounded, "Время работы",
-                      data['time'] ?? 'Не указано'),
-                  _detailItem(Icons.category_rounded, "Категория",
-                      data['categoryKey'] ?? 'Не указана'),
+                    _detailItem(Icons.location_on_rounded, 'Координаты',
+                        '${(data['lat'] as num).toStringAsFixed(5)}, ${(data['lng'] as num).toStringAsFixed(5)}'),
+                  _detailItem(Icons.access_time_filled_rounded, 'Время работы',
+                      (data['time'] ?? 'Не указано').toString()),
+                  _detailItem(Icons.category_rounded, 'Категория',
+                      (data['category'] ?? 'Не указана').toString()),
                   const SizedBox(height: 40),
                   Row(
                     children: [
                       Expanded(
-                        child: _actionButton("ОТКЛОНИТЬ", Colors.redAccent, true, () {
-                          _handleStatus(context, docId, 'rejected', data);
+                        child: _actionButton('ОТКЛОНИТЬ', Colors.redAccent, () async {
+                          Navigator.pop(sheetCtx);
+                          await _reject(data);
                         }),
                       ),
                       const SizedBox(width: 16),
                       Expanded(
-                        child: _actionButton("ОДОБРИТЬ", const Color(0xFF0F172A), true, () {
-                          _showCredentialsDialog(context, docId, data);
+                        child: _actionButton('ОДОБРИТЬ', const Color(0xFF0F172A), () {
+                          Navigator.pop(sheetCtx);
+                          _showCredentialsDialog(data);
                         }),
                       ),
                     ],
@@ -243,24 +284,49 @@ class AdminRequestsScreen extends StatelessWidget {
     );
   }
 
-  void _showCredentialsDialog(BuildContext context, String docId, Map<String, dynamic> data) {
-    final TextEditingController loginController = TextEditingController();
-    final TextEditingController passwordController = TextEditingController(text: "123456");
+  Future<void> _reject(Map<String, dynamic> data) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: const Text('Отклонить заявку?'),
+        content: const Text('Заявка будет удалена. Заведение сможет подать новую.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dctx, false), child: const Text('Нет')),
+          TextButton(
+              onPressed: () => Navigator.pop(dctx, true),
+              child: const Text('Отклонить', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    ) ??
+        false;
+    if (!ok) return;
+    final err = await _post('/api/admin/requests/${data['id']}/reject');
+    if (err != null) {
+      _snack(err, error: true);
+    } else {
+      _snack('Заявка отклонена', error: true);
+      _load(spinner: false);
+    }
+  }
+
+  void _showCredentialsDialog(Map<String, dynamic> data) {
+    final loginController = TextEditingController(text: (data['login'] ?? '').toString());
+    final passwordController = TextEditingController(text: _randomPassword());
 
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (dialogContext) => AlertDialog(
+      builder: (dctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text("Выдача доступа", style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('Выдача доступа', style: TextStyle(fontWeight: FontWeight.bold)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: loginController,
               decoration: const InputDecoration(
-                labelText: "Логин (login)",
-                hintText: "Например: buket_md",
+                labelText: 'Логин (login)',
+                hintText: 'Например: buket_md',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -268,30 +334,35 @@ class AdminRequestsScreen extends StatelessWidget {
             TextField(
               controller: passwordController,
               decoration: const InputDecoration(
-                labelText: "Пароль (password)",
+                labelText: 'Пароль (password)',
+                helperText: 'Запишите его: потом он не показывается',
                 border: OutlineInputBorder(),
               ),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text("ОТМЕНА")),
+          TextButton(onPressed: () => Navigator.pop(dctx), child: const Text('ОТМЕНА')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F172A)),
-            onPressed: () {
-              if (loginController.text.isNotEmpty) {
-                Navigator.pop(dialogContext);
-                _handleStatus(
-                    context,
-                    docId,
-                    'approved',
-                    data,
-                    login: loginController.text,
-                    pass: passwordController.text
-                );
+            onPressed: () async {
+              final login = loginController.text.trim();
+              final pass = passwordController.text.trim();
+              if (login.isEmpty || pass.isEmpty) {
+                _snack('Заполните логин и пароль', error: true);
+                return;
               }
+              final err = await _post('/api/admin/requests/${data['id']}/approve',
+                  {'login': login, 'password': pass});
+              if (err != null) {
+                _snack(err, error: true); // диалог остаётся открытым
+                return;
+              }
+              if (dctx.mounted) Navigator.pop(dctx);
+              _snack('Заведение создано! Логин: $login, пароль: $pass');
+              _load(spinner: false);
             },
-            child: const Text("СОХРАНИТЬ", style: TextStyle(color: Colors.white)),
+            child: const Text('СОХРАНИТЬ', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -333,7 +404,7 @@ class AdminRequestsScreen extends StatelessWidget {
     );
   }
 
-  Widget _actionButton(String title, Color color, bool isTextWhite, VoidCallback onTap) {
+  Widget _actionButton(String title, Color color, VoidCallback onTap) {
     return SizedBox(
       height: 55,
       child: ElevatedButton(
@@ -344,8 +415,8 @@ class AdminRequestsScreen extends StatelessWidget {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         ),
         child: Text(title,
-            style: TextStyle(
-                color: isTextWhite ? Colors.white : color,
+            style: const TextStyle(
+                color: Colors.white,
                 fontWeight: FontWeight.w800,
                 fontSize: 13,
                 letterSpacing: 1)),
@@ -360,12 +431,11 @@ class AdminRequestsScreen extends StatelessWidget {
         children: [
           Icon(Icons.auto_awesome_motion_rounded, size: 80, color: Colors.grey[200]),
           const SizedBox(height: 16),
-          const Text("Очередь пуста",
+          const Text('Очередь пуста',
               style: TextStyle(
                   color: Color(0xFF64748B), fontWeight: FontWeight.bold, fontSize: 18)),
           const SizedBox(height: 8),
-          const Text("Новые заявки появятся автоматически",
-              style: TextStyle(color: Colors.grey)),
+          const Text('Потяните вниз или нажмите обновить', style: TextStyle(color: Colors.grey)),
         ],
       ),
     );
@@ -380,75 +450,16 @@ class AdminRequestsScreen extends StatelessWidget {
           children: [
             const Icon(Icons.cloud_off_rounded, size: 60, color: Colors.redAccent),
             const SizedBox(height: 16),
-            const Text("Ошибка связи с Firebase",
+            const Text('Ошибка связи с сервером',
                 style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFC62828))),
             const SizedBox(height: 8),
             Text(error,
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            TextButton(onPressed: () => _load(), child: const Text('Повторить')),
           ],
         ),
       ),
     );
-  }
-
-  void _handleStatus(BuildContext context, String docId, String status, Map<String, dynamic> data, {String? login, String? pass}) async {
-    try {
-      final batch = FirebaseFirestore.instance.batch();
-      String businessName = data['businessName'] ?? 'ID: $docId';
-
-      DocumentReference requestRef = FirebaseFirestore.instance
-          .collection('business_requests')
-          .doc(docId);
-
-      if (status == 'approved') {
-        DocumentReference categoryRef = FirebaseFirestore.instance
-            .collection('categories')
-            .doc(docId);
-
-        batch.set(categoryRef, {
-          'category': data['categoryKey'] ?? '',
-          'login': login ?? '',
-          'logoUrl': data['logoUrl'] ?? '',
-          'name': data['businessName'] ?? '',
-          'password': pass ?? '',
-          'phone': data['phone'] ?? '',
-          'time': data['time'] ?? '',
-          'shopId': docId,
-          'address': data['address'] ?? '',
-          'lat': data['lat'],
-          'lng': data['lng'],
-          'isActive': true, // <--- Изначально включено (активно) в системе
-          'isOnline': true,  // <--- Для полной совместимости со списками
-        });
-
-        batch.update(requestRef, {
-          'status': 'approved',
-          'shopId': docId,
-        });
-      } else {
-        batch.update(requestRef, {'status': status});
-      }
-
-      // ПУШИМ В ЛОГИ ПЕРЕД КОММИТОМ
-      await _logAction(
-          status == 'approved' ? 'Одобрил заявку' : 'Отклонил заявку',
-          businessName
-      );
-
-      await batch.commit();
-
-      if (context.mounted) {
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(status == 'approved' ? 'Заведение успешно создано!' : 'Заявка отклонена'),
-            backgroundColor: status == 'approved' ? const Color(0xFF0F172A) : Colors.redAccent,
-          ),
-        );
-      }
-    } catch (e) {
-      debugPrint("Update error: $e");
-    }
   }
 }
