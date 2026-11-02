@@ -82,7 +82,7 @@ class AdminHome extends StatelessWidget {
                           icon: const Icon(Icons.logout_rounded,
                               color: _ink, size: 21),
                           onPressed: () async {
-                            await Api.clearSession();
+                            await Api.logout();
                             if (!context.mounted) return;
                             Navigator.pushReplacement(
                               context,

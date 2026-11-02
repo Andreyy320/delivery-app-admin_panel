@@ -1,4 +1,5 @@
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:http/http.dart' as http;
 
 class Api {
   static const String baseUrl = 'http://194.156.66.100:3100';
@@ -7,34 +8,39 @@ class Api {
 
   static const _kToken = 'admin_token';
   static const _kName = 'admin_name';
+  static const _s = FlutterSecureStorage();
 
   static Map<String, String> get headers => {
     'Content-Type': 'application/json',
     if (token != null) 'Authorization': 'Bearer $token',
   };
 
-  // Прочитать сохранённый вход при запуске приложения
   static Future<void> loadSession() async {
-    final p = await SharedPreferences.getInstance();
-    token = p.getString(_kToken);
-    adminName = p.getString(_kName);
+    token = await _s.read(key: _kToken);
+    adminName = await _s.read(key: _kName);
   }
 
-  // Запомнить вход после успешного логина
   static Future<void> saveSession(String newToken, String name) async {
     token = newToken;
     adminName = name;
-    final p = await SharedPreferences.getInstance();
-    await p.setString(_kToken, newToken);
-    await p.setString(_kName, name);
+    await _s.write(key: _kToken, value: newToken);
+    await _s.write(key: _kName, value: name);
   }
 
-  // Выход или просроченный токен
+  // Отзывает токен на сервере, потом стирает локально
+  static Future<void> logout() async {
+    try {
+      await http
+          .post(Uri.parse('$baseUrl/api/admin/logout'), headers: headers)
+          .timeout(const Duration(seconds: 5));
+    } catch (_) {}
+    await clearSession();
+  }
+
   static Future<void> clearSession() async {
     token = null;
     adminName = null;
-    final p = await SharedPreferences.getInstance();
-    await p.remove(_kToken);
-    await p.remove(_kName);
+    await _s.delete(key: _kToken);
+    await _s.delete(key: _kName);
   }
 }

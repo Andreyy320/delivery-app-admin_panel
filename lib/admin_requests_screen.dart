@@ -526,8 +526,8 @@ class _AdminRequestsScreenState extends State<AdminRequestsScreen> {
               setDialog(() => formError = 'Заполните логин и пароль');
               return;
             }
-            if (pass.length < 6) {
-              setDialog(() => formError = 'Пароль слишком короткий (минимум 6 символов)');
+            if (pass.length < 8) {
+              setDialog(() => formError = 'Пароль слишком короткий (минимум 8 символов)');
               return;
             }
 
